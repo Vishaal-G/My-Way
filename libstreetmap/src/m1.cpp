@@ -21,6 +21,7 @@
 #include <iostream>
 #include "m1.h"
 #include "StreetsDatabaseAPI.h"
+#include <cmath>
 
 
 // loadMap will be called with the name of the file that stores the "layer-2"
@@ -57,3 +58,89 @@ void closeMap() {
     //Clean-up your map related data structures here
     
 }
+
+double findDistanceBetweenTwoPoints(std::pair<LatLon, LatLon> points){
+    //Convert both sets of latitutde and longitude to radians
+    double lat1 = points.first.latitude() * kDegreeToRadian;
+    double lon1 = points.first.longitude() * kDegreeToRadian;
+
+    double lat2 = points.second.latitude() * kDegreeToRadian;
+    double lon2 = points.second.longitude() * kDegreeToRadian;
+
+    //Find average of latitudes
+    double latAvg = (lat1 + lat2) / 2.0;
+
+    //Compute projected x,y coordinates
+    double x1 = kEarthRadiusInMeters * lon1 * cos(latAvg);
+    double y1 = kEarthRadiusInMeters * lat1;
+
+    double x2 = kEarthRadiusInMeters * lon2 * cos(latAvg);
+    double y2 = kEarthRadiusInMeters * lat2;
+
+    //Compute distance and return it
+    return sqrt((x2-x1)*(x2-x1) + (y2-y1)*(y2-y1));
+
+}
+
+double findStreetSegmentLength(StreetSegmentIdx street_segment_id){
+    return 0;
+}
+
+double findStreetSegmentTravelTime(StreetSegmentIdx street_segment_id){
+    return 0;
+}
+
+double findStreetSegmentTurnAngle(StreetSegmentIdx dst_street_segment_id, StreetSegmentIdx src_street_segment_id){
+    return 0;
+}
+
+std::vector<IntersectionIdx> findAdjacentIntersections(IntersectionIdx intersection_id){
+    return {};
+}
+
+IntersectionIdx findClosestIntersection(LatLon my_position){
+    return 0;
+}
+
+std::vector<IntersectionIdx> findIntersectionsOfStreet(StreetIdx street_id){
+    return {};
+}
+
+std::vector<IntersectionIdx> findIntersectionsOfTwoStreets(StreetIdx street_id1, StreetIdx street_id2){
+    return {};
+}
+
+std::vector<StreetIdx> findStreetIdsFromPartialStreetName(std::string street_prefix){
+
+}
+
+LatLonBounds findStreetBoundingBox (StreetIdx street_id){
+    LatLonBounds bounds{};
+    return bounds;
+
+}
+
+std::vector<StreetSegmentIdx> findStreetSegmentsOfIntersection(IntersectionIdx intersection_id){
+    return {};
+}
+
+double findStreetLength(StreetIdx street_id){
+    return 0;
+}
+
+POIIdx findClosestPOI(LatLon my_position, std::string poi_name){
+    return 0;
+}
+
+double findFeatureArea(FeatureIdx feature_id){
+    return 0;
+}
+
+double findWayLength(OSMID way_id){
+    return 0;
+}
+
+std::string getOSMNodeTagValue(OSMID osm_id, std::string key){
+    return "";
+}
+
