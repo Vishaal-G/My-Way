@@ -83,7 +83,34 @@ double findDistanceBetweenTwoPoints(std::pair<LatLon, LatLon> points){
 }
 
 double findStreetSegmentLength(StreetSegmentIdx street_segment_id){
-    return 0;
+    //Getting from and to ID's
+    StreetSegmentInfo info = getStreetSegmentInfo(street_segment_id);
+
+    //Get Lat/Lon coordinates of the start and finish
+    LatLon start = getIntersectionPosition(info.from);
+    LatLon finish = getIntersectionPosition(info.to);
+
+    //Compute distance based on how many curve points there are
+    double totalDistance = 0;
+    
+    //Set starting location to start coordinate 
+    LatLon prev = start;
+
+    //Loop till number of curve points are there, so we can calculate each segment
+    for (int i = 0; i < info.numCurvePoints; i++){
+        //Get current coordinate of the curve and compute distance of line segment
+        LatLon current = getStreetSegmentCurvePoint(street_segment_id, i);
+        totalDistance += findDistanceBetweenTwoPoints({prev,current});
+        prev = current;
+    }
+
+    //Loop doesnt account for the line segment between last point --> finish, so include it
+    totalDistance += findDistanceBetweenTwoPoints({prev, finish});
+    return totalDistance;
+
+
+
+
 }
 
 double findStreetSegmentTravelTime(StreetSegmentIdx street_segment_id){
