@@ -22,6 +22,12 @@
 #include "m1.h"
 #include "StreetsDatabaseAPI.h"
 #include <cmath>
+#include <map> 
+#include <vector> 
+#include <string> 
+#include <algorithm> 
+#include <utility>
+#include <cctype> 
 
 
 // loadMap will be called with the name of the file that stores the "layer-2"
@@ -36,6 +42,20 @@
 // name of the ".osm.bin" file that matches your map -- just change 
 // ".streets" to ".osm" in the map_streets_database_filename to get the proper
 // name.
+
+//Global to store street name and the street index 
+std::vector<std::pair<std::string, StreetIdx>> streetNametoId;
+//HELPER FUNCTION, removes spaces and makes string all lowercase 
+std::string cleanName(std::string name){
+    std::string cleaned; 
+    for(char c : name){
+        if(c != ' '){
+            cleaned += std::tolower(c);
+        }
+    }
+    return cleaned; 
+}
+
 bool loadMap(std::string map_streets_database_filename) {
     bool load_successful = false; //Indicates whether the map has loaded 
                                   //successfully
@@ -45,7 +65,16 @@ bool loadMap(std::string map_streets_database_filename) {
     //
     // Load your map related data structures here.
     //
-
+    //For the function findStreetIdsFromPartialStreetName, need to first create structure to make look up time faster
+    
+    streetNametoId.clear(); //Clean up the map on each run 
+    streetNametoId.reserve(getNumStreets());
+    for(int i = 0; i < getNumStreets(); i++){
+        std::string inputName = getStreetName(i); //Gets all street names 
+        std::string streetName = cleanName(inputName); //Gets rid of spaces and all lowercase
+        streetNametoId.push_back({streetName, i}); 
+    }
+    std::sort(streetNametoId.begin(), streetNametoId.end()); //Sorts the street names by alphabetical order 
     
 
     load_successful = true; //Make sure this is updated to reflect whether
@@ -138,7 +167,31 @@ std::vector<IntersectionIdx> findIntersectionsOfTwoStreets(StreetIdx street_id1,
 }
 
 std::vector<StreetIdx> findStreetIdsFromPartialStreetName(std::string street_prefix){
+    std::vector<StreetIdx> answer;
+    if(street_prefix.empty()){ //If parameter is empty, return empty vector 
+        return answer; 
+    }
+    //Make the parameter all lowercase and get rid of spaces 
+    std::string prefix = cleanName(street_prefix);
 
+
+    //Create a target to search for
+    //-1 is less than any index, to ensure that the iterator starts at the first prefix
+    std::pair<std::string, StreetIdx> target = std::make_pair(prefix, -1);
+    //Create iterator it to iterate through streetNametoId  
+    std::vector<std::pair<std::string, StreetIdx>>::iterator it; 
+    //lower_bound searches through streetNametoId to get the first element >= target
+    it = std::lower_bound(streetNametoId.begin(), streetNametoId.end(), target); 
+
+    //Compares all keys in streetNametoId where prefix is the same, and adds it to answer 
+    while(it != streetNametoId.end()){
+        if(it->first.compare(0, prefix.length(), prefix) != 0){//Compares prefix 
+            break; 
+        }
+        answer.push_back(it->second);//Insert street index if same prefix 
+        ++it; 
+    }
+    return answer; 
 }
 
 LatLonBounds findStreetBoundingBox (StreetIdx street_id){
