@@ -29,6 +29,7 @@
 #include <utility>
 #include <cctype> 
 #include <limits> 
+#include <unordered_map> 
 
 
 // loadMap will be called with the name of the file that stores the "layer-2"
@@ -59,7 +60,12 @@ std::string cleanName(std::string name){
 }
 
 //Used for findClosestIntersection 
-std::vector<LatLon> pointsOfIntersections; 
+std::vector<LatLon> pointsOfIntersections;
+
+//Used for findClosestPOI
+std::vector<LatLon> POIPositions; //Stores LatLon of all the POIs
+std::unordered_map<std::string, std::vector<POIIdx>> POIbyName; //Allows you to look up all Indexes of a POI by name 
+
 
 bool loadMap(std::string map_streets_database_filename) {
     bool load_successful = false; //Indicates whether the map has loaded 
@@ -78,12 +84,27 @@ bool loadMap(std::string map_streets_database_filename) {
     }
     std::sort(streetNametoId.begin(), streetNametoId.end()); //Sorts the street names by alphabetical order 
     
-    //For findClosestIntersection, stores all the LatLons of the POIs for faster lookup time 
+    //For findClosestIntersection, stores all the LatLons of the intersections for faster lookup time 
     int numOfIntersections = getNumIntersections(); 
     pointsOfIntersections.resize(numOfIntersections); 
     for(int i = 0; i < numOfIntersections; ++i){
         pointsOfIntersections[i] = getIntersectionPosition(i); 
     }
+
+    //For findClosestPOI
+    int numberOfPOIs = getNumPointsOfInterest(); 
+    POIPositions.resize(numberOfPOIs);
+    POIbyName.clear(); //Clear the hashmap 
+    POIbyName.reserve(numberOfPOIs); 
+    for(int i = 0; i < numberOfPOIs; ++i){
+        //Stores all the LatLon of POIs
+        POIPositions[i] = getPOIPosition(i);
+
+        //Stores name and groups names of POI with associated index 
+        std:: string POIName = getPOIName(i); 
+        POIbyName[POIName].push_back(i); 
+    }
+
 
 
     load_successful = true; //Make sure this is updated to reflect whether
@@ -172,7 +193,7 @@ IntersectionIdx findClosestIntersection(LatLon my_position){
     //Gets distance from my_position to every intersection to find the lowest distance one
     for(int i = 0; i < pointsOfIntersections.size(); i++){
         double distance = findDistanceBetweenTwoPoints(std::make_pair(my_position, pointsOfIntersections[i])); 
-        if(distance < answer){
+        if(distance < minDistance){
             minDistance = distance; 
             answer = i; 
         }   
@@ -231,7 +252,27 @@ double findStreetLength(StreetIdx street_id){
 }
 
 POIIdx findClosestPOI(LatLon my_position, std::string poi_name){
-    return 0;
+
+    //it is iterator of hashmap, finds the list of POIs with the given name 
+    auto it = POIbyName.find(poi_name); 
+    if(it == POIbyName.end())
+        return -1; 
+
+    //Use & so it doesn't make a copy, and foundPOIs stores the vector of POIIdxs 
+    const std::vector<POIIdx>& foundPOIs = it->second; 
+    POIIdx answer = -1; 
+    double minDistance = std::numeric_limits<double>::max(); 
+
+    for(POIIdx POIIndex : foundPOIs){//Loops through all the indexes of the found POIs
+        LatLon POIPosition = POIPositions[POIIndex]; //Get the LatLon of index  
+        double distance = findDistanceBetweenTwoPoints(std::make_pair(my_position, POIPosition)); 
+        
+        if(distance < minDistance){
+            minDistance = distance; 
+            answer = POIIndex; 
+        }
+    }
+    return answer;
 }
 
 double findFeatureArea(FeatureIdx feature_id){
