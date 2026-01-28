@@ -45,9 +45,11 @@
 // ".streets" to ".osm" in the map_streets_database_filename to get the proper
 // name.
 
-//Used for findStreetIdsFromPartialStreetName
-//Global to store street name and the street index 
-std::vector<std::pair<std::string, StreetIdx>> streetNametoId; 
+// Global variable declarations
+std::vector<std::pair<std::string, StreetIdx>> streetNametoId; //Used for findStreetIdsFromPartialStreetName
+                                                               //Global to store street name and the street index 
+static std::vector<std::vector<IntersectionIdx>> street_to_intersections;
+
 //HELPER FUNCTION, removes spaces and makes string all lowercase 
 std::string cleanName(std::string name){
     std::string cleaned; 
@@ -68,8 +70,10 @@ std::unordered_map<std::string, std::vector<POIIdx>> POIbyName; //Allows you to 
 
 
 bool loadMap(std::string map_streets_database_filename) {
-    bool load_successful = false; //Indicates whether the map has loaded 
-                                  //successfully
+    bool load_successful = loadStreetsDatabaseBIN(map_streets_database_filename);
+    if (!load_successful) {
+        return false; //Indicates whether the map has loaded successfully
+    } 
 
     std::cout << "loadMap: " << map_streets_database_filename << std::endl;
 
@@ -96,6 +100,7 @@ bool loadMap(std::string map_streets_database_filename) {
     POIPositions.resize(numberOfPOIs);
     POIbyName.clear(); //Clear the hashmap 
     POIbyName.reserve(numberOfPOIs); 
+
     for(int i = 0; i < numberOfPOIs; ++i){
         //Stores all the LatLon of POIs
         POIPositions[i] = getPOIPosition(i);
@@ -105,7 +110,24 @@ bool loadMap(std::string map_streets_database_filename) {
         POIbyName[POIName].push_back(i); 
     }
 
+    // For findIntersectionsOfStreet, findIntersectionsOfTwoStreets
+    street_to_intersections.clear();
+    street_to_intersections.resize(getNumStreets());
 
+    for (StreetSegmentIdx i = 0; i < getNumStreetSegments(); i++) {
+        StreetSegmentInfo info = getStreetSegmentInfo(i);
+
+        // Every segment touches two intersections
+        street_to_intersections[info.streetID].push_back(info.from);
+        street_to_intersections[info.streetID].push_back(info.to);
+    }
+    for (size_t i = 0; i < street_to_intersections.size(); i++) { 
+
+        // Removing duplicate intersections in the vector
+        std::vector<IntersectionIdx> &intersections= street_to_intersections[i];
+        std::sort(intersections.begin(), intersections.end()); // Sort all streets so duplicates are next to eachother
+        intersections.erase(std::unique(intersections.begin(), intersections.end()), intersections.end()); // Deletes streets that are not duplicates
+    }
 
     load_successful = true; //Make sure this is updated to reflect whether
                             //loading the map succeeded or failed
@@ -202,7 +224,7 @@ IntersectionIdx findClosestIntersection(LatLon my_position){
 }
 
 std::vector<IntersectionIdx> findIntersectionsOfStreet(StreetIdx street_id){
-    return {};
+    return street_to_intersections[street_id];
 }
 
 std::vector<IntersectionIdx> findIntersectionsOfTwoStreets(StreetIdx street_id1, StreetIdx street_id2){
