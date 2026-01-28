@@ -28,6 +28,7 @@
 #include <algorithm> 
 #include <utility>
 #include <cctype> 
+#include <limits> 
 
 
 // loadMap will be called with the name of the file that stores the "layer-2"
@@ -43,8 +44,9 @@
 // ".streets" to ".osm" in the map_streets_database_filename to get the proper
 // name.
 
+//Used for findStreetIdsFromPartialStreetName
 //Global to store street name and the street index 
-std::vector<std::pair<std::string, StreetIdx>> streetNametoId;
+std::vector<std::pair<std::string, StreetIdx>> streetNametoId; 
 //HELPER FUNCTION, removes spaces and makes string all lowercase 
 std::string cleanName(std::string name){
     std::string cleaned; 
@@ -56,17 +58,17 @@ std::string cleanName(std::string name){
     return cleaned; 
 }
 
+//Used for findClosestIntersection 
+std::vector<LatLon> pointsOfIntersections; 
+
 bool loadMap(std::string map_streets_database_filename) {
     bool load_successful = false; //Indicates whether the map has loaded 
                                   //successfully
 
     std::cout << "loadMap: " << map_streets_database_filename << std::endl;
 
-    //
-    // Load your map related data structures here.
-    //
-    //For the function findStreetIdsFromPartialStreetName, need to first create structure to make look up time faster
-    
+  
+    //For findStreetIdsFromPartialStreetName, need to first create structure to make look up time faster
     streetNametoId.clear(); //Clean up the map on each run 
     streetNametoId.reserve(getNumStreets());
     for(int i = 0; i < getNumStreets(); i++){
@@ -76,6 +78,13 @@ bool loadMap(std::string map_streets_database_filename) {
     }
     std::sort(streetNametoId.begin(), streetNametoId.end()); //Sorts the street names by alphabetical order 
     
+    //For findClosestIntersection, stores all the LatLons of the POIs for faster lookup time 
+    int numOfIntersections = getNumIntersections(); 
+    pointsOfIntersections.resize(numOfIntersections); 
+    for(int i = 0; i < numOfIntersections; ++i){
+        pointsOfIntersections[i] = getIntersectionPosition(i); 
+    }
+
 
     load_successful = true; //Make sure this is updated to reflect whether
                             //loading the map succeeded or failed
@@ -137,9 +146,6 @@ double findStreetSegmentLength(StreetSegmentIdx street_segment_id){
     totalDistance += findDistanceBetweenTwoPoints({prev, finish});
     return totalDistance;
 
-
-
-
 }
 
 double findStreetSegmentTravelTime(StreetSegmentIdx street_segment_id){
@@ -155,7 +161,23 @@ std::vector<IntersectionIdx> findAdjacentIntersections(IntersectionIdx intersect
 }
 
 IntersectionIdx findClosestIntersection(LatLon my_position){
-    return 0;
+    
+    //Edge case where there are no points of intersections 
+    if(pointsOfIntersections.empty())
+        return -1; 
+
+    IntersectionIdx answer; 
+    double minDistance = std::numeric_limits<double>::max(); //Makes minDistance largest possible number 
+
+    //Gets distance from my_position to every intersection to find the lowest distance one
+    for(int i = 0; i < pointsOfIntersections.size(); i++){
+        double distance = findDistanceBetweenTwoPoints(std::make_pair(my_position, pointsOfIntersections[i])); 
+        if(distance < answer){
+            minDistance = distance; 
+            answer = i; 
+        }   
+    }   
+    return answer;
 }
 
 std::vector<IntersectionIdx> findIntersectionsOfStreet(StreetIdx street_id){
