@@ -41,5 +41,10 @@
             "binaryPath": "./test_libstreetmap",
             "binaryArgs": []
         }
-    ]
+    ],
+    "files.associations": {
+        "vector": "cpp",
+        "initializer_list": "cpp",
+        "string_view": "cpp"
+    }
 }
