@@ -30,6 +30,7 @@
 #include <cctype> 
 #include <limits> 
 #include <unordered_map> 
+#include <iterator>
 
 
 // loadMap will be called with the name of the file that stores the "layer-2"
@@ -227,8 +228,26 @@ std::vector<IntersectionIdx> findIntersectionsOfStreet(StreetIdx street_id){
     return street_to_intersections[street_id];
 }
 
-std::vector<IntersectionIdx> findIntersectionsOfTwoStreets(StreetIdx street_id1, StreetIdx street_id2){
-    return {};
+std::vector<IntersectionIdx> findIntersectionsOfTwoStreets(StreetIdx street_id1, StreetIdx street_id2){ 
+
+    // Find intersections of street 1
+    std::vector<IntersectionIdx> &street1_intersections =
+        street_to_intersections[street_id1];
+
+    // Find intersections of street 2
+    std::vector<IntersectionIdx> &street2_intersections =
+        street_to_intersections[street_id2];
+
+    std::vector<IntersectionIdx> result; // Store the intersections  of both streets
+
+    // Find common intersections of the two streets
+    std::set_intersection(
+        street1_intersections.begin(), street1_intersections.end(),
+        street2_intersections.begin(), street2_intersections.end(),
+        std::back_inserter(result) // Adds common intersection to result list
+    );
+
+    return result;
 }
 
 std::vector<StreetIdx> findStreetIdsFromPartialStreetName(std::string street_prefix){
