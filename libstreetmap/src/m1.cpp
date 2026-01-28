@@ -204,8 +204,112 @@ double findStreetSegmentTravelTime(StreetSegmentIdx street_segment_id){
 }
 
 double findStreetSegmentTurnAngle(StreetSegmentIdx dst_street_segment_id, StreetSegmentIdx src_street_segment_id){
-    return 0;
+    //Get information about curve points, intersection ID's
+    StreetSegmentInfo src = getStreetSegmentInfo(src_street_segment_id);
+    StreetSegmentInfo dst = getStreetSegmentInfo(dst_street_segment_id);
+
+    //Check if the two segments share an intersection, if not, impossible to turn
+    bool shares_src_from = (src.from == dst.from) || (src.from == dst.to);
+    bool shares_src_to   = (src.to   == dst.from) || (src.to   == dst.to);
+
+    //If not meet, then return no angle
+    if (!shares_src_from && !shares_src_to){
+        return NO_ANGLE;
+    }
+
+    //Find out which intersection is shared 
+    IntersectionIdx shared;
+
+    if (shares_src_from){
+        shared = src.from;
+    }
+    else{
+        shared = src.to;
+    }
+
+    //If intersection is to part of line segment, use the last curved point to determine angle
+    //If intersection to from part of line segment, use the first curved point to determine angle
+    //We get the closest points right beside the intersection on each line segment
+    LatLon A;
+    if (shared == src.from) {
+        if (src.numCurvePoints > 0){
+            A = getStreetSegmentCurvePoint(src_street_segment_id, 0);
+        }
+        else {
+            A = getIntersectionPosition(src.to);
+        }
+    } else {
+        if (src.numCurvePoints > 0){
+            A = getStreetSegmentCurvePoint(src_street_segment_id, src.numCurvePoints - 1);
+        }
+        else {
+            A = getIntersectionPosition(src.from);
+        }
+    }
+    
+    //Same logic for destination line segment
+    LatLon B;
+    if (shared == dst.from) {
+        if (dst.numCurvePoints > 0) {
+            B = getStreetSegmentCurvePoint(dst_street_segment_id, 0);
+        }
+        else {
+            B = getIntersectionPosition(dst.to);
+        }
+    } else {
+        if (dst.numCurvePoints > 0) {
+            B = getStreetSegmentCurvePoint(dst_street_segment_id, dst.numCurvePoints - 1);
+        }
+        else {
+            B = getIntersectionPosition(dst.from);
+        }
+    }
+
+    LatLon S = getIntersectionPosition(shared);
+
+    //We create two vectors A -> Intersection and Intersection --> B
+    //Store all latitudes and longitudes of points
+    double latA = A.latitude() * kDegreeToRadian;
+    double lonA = A.longitude() * kDegreeToRadian;
+
+    double latS = S.latitude() * kDegreeToRadian;
+    double lonS = S.longitude() * kDegreeToRadian;
+
+    double latB = B.latitude() * kDegreeToRadian;
+    double lonB = B.longitude() * kDegreeToRadian;
+
+    //Calculate average latitude and project to x y coordinates to do vector math
+
+    //Conversion for Starting line segment -> Intersection
+    double latAvg_in = (latA + latS) / 2.0;
+    double Ax   = kEarthRadiusInMeters * lonA * cos(latAvg_in);
+    double Ay   = kEarthRadiusInMeters * latA;
+    double Sx_in = kEarthRadiusInMeters * lonS * cos(latAvg_in);
+    double Sy_in = kEarthRadiusInMeters * latS;
+
+    //Conversion for Ending line segment -> Intersection
+    double latAvg_out = (latS + latB) / 2.0;
+    double Sx_out= kEarthRadiusInMeters * lonS * cos(latAvg_out);
+    double Sy_out= kEarthRadiusInMeters * latS;
+    double Bx   = kEarthRadiusInMeters * lonB * cos(latAvg_out);
+    double By   = kEarthRadiusInMeters * latB;
+
+    //Build vector Starting Line Segment -> Intersection
+    double inx = Sx_in - Ax;
+    double iny = Sy_in - Ay;
+
+    //Build vector Intersection -> Destination Line Segment
+    double outx = Bx - Sx_out;
+    double outy = By - Sy_out;
+
+    //Compute angle
+    //Dot tells me the angle mangitude and cross gives me the direction
+    //Using atan2 is faster way of combining the cross and dot together at the end using if statements 
+    double dot   = inx * outx + iny * outy;
+    double cross = inx * outy - iny * outx;
+    return atan2(cross, dot);
 }
+
 
 std::vector<IntersectionIdx> findAdjacentIntersections(IntersectionIdx intersection_id){
     return {};
