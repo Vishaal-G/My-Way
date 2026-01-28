@@ -193,7 +193,14 @@ double findStreetSegmentLength(StreetSegmentIdx street_segment_id){
 }
 
 double findStreetSegmentTravelTime(StreetSegmentIdx street_segment_id){
-    return 0;
+    // Load street data
+    StreetSegmentInfo info = getStreetSegmentInfo(street_segment_id);
+
+    // Finding time using distance/speed
+    double length = findStreetSegmentLength(street_segment_id); // m
+    double speed = info.speedLimit; // metres/s
+
+    return length / speed;
 }
 
 double findStreetSegmentTurnAngle(StreetSegmentIdx dst_street_segment_id, StreetSegmentIdx src_street_segment_id){
