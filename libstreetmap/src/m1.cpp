@@ -390,10 +390,57 @@ std::vector<StreetIdx> findStreetIdsFromPartialStreetName(std::string street_pre
 }
 
 LatLonBounds findStreetBoundingBox (StreetIdx street_id){
-    LatLonBounds bounds{};
-    return bounds;
+    //Set minimum to biggest possible number initially 
+    //Set maximum to smallest possible number intially 
+    double minLat = std::numeric_limits<double>::max();
+    double maxLat = std::numeric_limits<double>::lowest();
+    double minLon = std::numeric_limits<double>::max();
+    double maxLon = std::numeric_limits<double>::lowest();
 
+    //Loop through every street segment and only process the ones that belong to street_id
+    for (StreetSegmentIdx seg = 0; seg < getNumStreetSegments(); seg++){
+        //Get info about current street segment
+        StreetSegmentInfo info = getStreetSegmentInfo(seg);
+
+        //Check if this street segment belongs on the street we want
+        if (info.streetID != street_id){
+            continue;
+        }
+
+        //Get endpoints (intersections)
+        LatLon fromPos = getIntersectionPosition(info.from);
+        LatLon toPos   = getIntersectionPosition(info.to);
+
+        //Update min/max values checking the starting point of segment
+        minLat = std::min(minLat, fromPos.latitude());
+        maxLat = std::max(maxLat, fromPos.latitude());
+        minLon = std::min(minLon, fromPos.longitude());
+        maxLon = std::max(maxLon, fromPos.longitude());
+
+        //Update min/max values checking the destination point of segment
+        minLat = std::min(minLat, toPos.latitude());
+        maxLat = std::max(maxLat, toPos.latitude());
+        minLon = std::min(minLon, toPos.longitude());
+        maxLon = std::max(maxLon, toPos.longitude());
+
+        //Check if curve points have new max/min long/lat
+        for (int i = 0; i < info.numCurvePoints; i++){
+            LatLon cp = getStreetSegmentCurvePoint(seg, i);
+
+            minLat = std::min(minLat, cp.latitude());
+            maxLat = std::max(maxLat, cp.latitude());
+            minLon = std::min(minLon, cp.longitude());
+            maxLon = std::max(maxLon, cp.longitude());
+        }
+    }
+
+    //Create a new LatLonBounds object to update max/min values
+    LatLonBounds bounds;
+    bounds.min = LatLon(minLat, minLon);
+    bounds.max = LatLon(maxLat, maxLon);
+    return bounds;
 }
+
 
 std::vector<StreetSegmentIdx> findStreetSegmentsOfIntersection(IntersectionIdx intersection_id){
     return {};
