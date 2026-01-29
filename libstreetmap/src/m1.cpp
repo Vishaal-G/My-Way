@@ -21,6 +21,7 @@
 #include <iostream>
 #include "m1.h"
 #include "StreetsDatabaseAPI.h"
+#include "OSMDatabaseAPI.h"
 #include <cmath>
 #include <map> 
 #include <vector> 
@@ -68,6 +69,10 @@ std::vector<LatLon> pointsOfIntersections;
 //Used for findClosestPOI
 std::vector<LatLon> POIPositions; //Stores LatLon of all the POIs
 std::unordered_map<std::string, std::vector<POIIdx>> POIbyName; //Allows you to look up all Indexes of a POI by name 
+
+//Used for findWayLength 
+std::unordered_map<OSMID, const OSMWay*> OSMWayFromID;
+std::unordered_map<OSMID, LatLon> LatLonFromOSMID;
 
 
 bool loadMap(std::string map_streets_database_filename) {
@@ -130,6 +135,39 @@ bool loadMap(std::string map_streets_database_filename) {
         intersections.erase(std::unique(intersections.begin(), intersections.end()), intersections.end()); // Deletes streets that are not duplicates
     }
 
+    //For findWayLength 
+    //This is to replace the streets file with the osm file 
+    std::string osm_filename = map_streets_database_filename; 
+    std::string replace = ".streets.bin";
+    std::string replaceWith = ".osm.bin";
+    //Loads the OSM database 
+    size_t find = osm_filename.find(replace);
+    osm_filename.replace(find, replace.length(), replaceWith); //Gets the OSM database 
+    bool osm_load_successful = loadOSMDatabaseBIN(osm_filename);
+    if (!osm_load_successful) {
+        return false; //Indicates whether the map has loaded successfully
+    }
+    //Populate the LatLonFromOSMID hashmap 
+    int numNodes = getNumberOfNodes(); 
+    LatLonFromOSMID.clear(); 
+    LatLonFromOSMID.reserve(numNodes); 
+
+    for(int i = 0; i < numNodes; ++i){
+        const OSMNode* node = getNodeByIndex(i); 
+        LatLonFromOSMID[node->id()] = getNodeCoords(node); 
+    }
+
+    //Populate the OSMWayFromID hashmap 
+    int numWays = getNumberOfWays();
+    OSMWayFromID.clear();
+    OSMWayFromID.reserve(numWays);
+
+    for (int i = 0; i < numWays; ++i) {
+        const OSMWay* way = getWayByIndex(i);
+        OSMWayFromID[way->id()] = way;
+    }
+
+
     load_successful = true; //Make sure this is updated to reflect whether
                             //loading the map succeeded or failed
 
@@ -138,7 +176,13 @@ bool loadMap(std::string map_streets_database_filename) {
 
 void closeMap() {
     //Clean-up your map related data structures here
+
+    //Deallocate the memory 
+    OSMWayFromID.clear();
+    LatLonFromOSMID.clear();
     
+    //Close the OSM Database 
+    closeOSMDatabase();
 }
 
 double findDistanceBetweenTwoPoints(std::pair<LatLon, LatLon> points){
@@ -204,112 +248,8 @@ double findStreetSegmentTravelTime(StreetSegmentIdx street_segment_id){
 }
 
 double findStreetSegmentTurnAngle(StreetSegmentIdx dst_street_segment_id, StreetSegmentIdx src_street_segment_id){
-    //Get information about curve points, intersection ID's
-    StreetSegmentInfo src = getStreetSegmentInfo(src_street_segment_id);
-    StreetSegmentInfo dst = getStreetSegmentInfo(dst_street_segment_id);
-
-    //Check if the two segments share an intersection, if not, impossible to turn
-    bool shares_src_from = (src.from == dst.from) || (src.from == dst.to);
-    bool shares_src_to   = (src.to   == dst.from) || (src.to   == dst.to);
-
-    //If not meet, then return no angle
-    if (!shares_src_from && !shares_src_to){
-        return NO_ANGLE;
-    }
-
-    //Find out which intersection is shared 
-    IntersectionIdx shared;
-
-    if (shares_src_from){
-        shared = src.from;
-    }
-    else{
-        shared = src.to;
-    }
-
-    //If intersection is to part of line segment, use the last curved point to determine angle
-    //If intersection to from part of line segment, use the first curved point to determine angle
-    //We get the closest points right beside the intersection on each line segment
-    LatLon A;
-    if (shared == src.from) {
-        if (src.numCurvePoints > 0){
-            A = getStreetSegmentCurvePoint(src_street_segment_id, 0);
-        }
-        else {
-            A = getIntersectionPosition(src.to);
-        }
-    } else {
-        if (src.numCurvePoints > 0){
-            A = getStreetSegmentCurvePoint(src_street_segment_id, src.numCurvePoints - 1);
-        }
-        else {
-            A = getIntersectionPosition(src.from);
-        }
-    }
-    
-    //Same logic for destination line segment
-    LatLon B;
-    if (shared == dst.from) {
-        if (dst.numCurvePoints > 0) {
-            B = getStreetSegmentCurvePoint(dst_street_segment_id, 0);
-        }
-        else {
-            B = getIntersectionPosition(dst.to);
-        }
-    } else {
-        if (dst.numCurvePoints > 0) {
-            B = getStreetSegmentCurvePoint(dst_street_segment_id, dst.numCurvePoints - 1);
-        }
-        else {
-            B = getIntersectionPosition(dst.from);
-        }
-    }
-
-    LatLon S = getIntersectionPosition(shared);
-
-    //We create two vectors A -> Intersection and Intersection --> B
-    //Store all latitudes and longitudes of points
-    double latA = A.latitude() * kDegreeToRadian;
-    double lonA = A.longitude() * kDegreeToRadian;
-
-    double latS = S.latitude() * kDegreeToRadian;
-    double lonS = S.longitude() * kDegreeToRadian;
-
-    double latB = B.latitude() * kDegreeToRadian;
-    double lonB = B.longitude() * kDegreeToRadian;
-
-    //Calculate average latitude and project to x y coordinates to do vector math
-
-    //Conversion for Starting line segment -> Intersection
-    double latAvg_in = (latA + latS) / 2.0;
-    double Ax   = kEarthRadiusInMeters * lonA * cos(latAvg_in);
-    double Ay   = kEarthRadiusInMeters * latA;
-    double Sx_in = kEarthRadiusInMeters * lonS * cos(latAvg_in);
-    double Sy_in = kEarthRadiusInMeters * latS;
-
-    //Conversion for Ending line segment -> Intersection
-    double latAvg_out = (latS + latB) / 2.0;
-    double Sx_out= kEarthRadiusInMeters * lonS * cos(latAvg_out);
-    double Sy_out= kEarthRadiusInMeters * latS;
-    double Bx   = kEarthRadiusInMeters * lonB * cos(latAvg_out);
-    double By   = kEarthRadiusInMeters * latB;
-
-    //Build vector Starting Line Segment -> Intersection
-    double inx = Sx_in - Ax;
-    double iny = Sy_in - Ay;
-
-    //Build vector Intersection -> Destination Line Segment
-    double outx = Bx - Sx_out;
-    double outy = By - Sy_out;
-
-    //Compute angle
-    //Dot tells me the angle mangitude and cross gives me the direction
-    //Using atan2 is faster way of combining the cross and dot together at the end using if statements 
-    double dot   = inx * outx + iny * outy;
-    double cross = inx * outy - iny * outx;
-    return atan2(cross, dot);
+    return 0;
 }
-
 
 std::vector<IntersectionIdx> findAdjacentIntersections(IntersectionIdx intersection_id){
     return {};
@@ -390,57 +330,10 @@ std::vector<StreetIdx> findStreetIdsFromPartialStreetName(std::string street_pre
 }
 
 LatLonBounds findStreetBoundingBox (StreetIdx street_id){
-    //Set minimum to biggest possible number initially 
-    //Set maximum to smallest possible number intially 
-    double minLat = std::numeric_limits<double>::max();
-    double maxLat = std::numeric_limits<double>::lowest();
-    double minLon = std::numeric_limits<double>::max();
-    double maxLon = std::numeric_limits<double>::lowest();
-
-    //Loop through every street segment and only process the ones that belong to street_id
-    for (StreetSegmentIdx seg = 0; seg < getNumStreetSegments(); seg++){
-        //Get info about current street segment
-        StreetSegmentInfo info = getStreetSegmentInfo(seg);
-
-        //Check if this street segment belongs on the street we want
-        if (info.streetID != street_id){
-            continue;
-        }
-
-        //Get endpoints (intersections)
-        LatLon fromPos = getIntersectionPosition(info.from);
-        LatLon toPos   = getIntersectionPosition(info.to);
-
-        //Update min/max values checking the starting point of segment
-        minLat = std::min(minLat, fromPos.latitude());
-        maxLat = std::max(maxLat, fromPos.latitude());
-        minLon = std::min(minLon, fromPos.longitude());
-        maxLon = std::max(maxLon, fromPos.longitude());
-
-        //Update min/max values checking the destination point of segment
-        minLat = std::min(minLat, toPos.latitude());
-        maxLat = std::max(maxLat, toPos.latitude());
-        minLon = std::min(minLon, toPos.longitude());
-        maxLon = std::max(maxLon, toPos.longitude());
-
-        //Check if curve points have new max/min long/lat
-        for (int i = 0; i < info.numCurvePoints; i++){
-            LatLon cp = getStreetSegmentCurvePoint(seg, i);
-
-            minLat = std::min(minLat, cp.latitude());
-            maxLat = std::max(maxLat, cp.latitude());
-            minLon = std::min(minLon, cp.longitude());
-            maxLon = std::max(maxLon, cp.longitude());
-        }
-    }
-
-    //Create a new LatLonBounds object to update max/min values
-    LatLonBounds bounds;
-    bounds.min = LatLon(minLat, minLon);
-    bounds.max = LatLon(maxLat, maxLon);
+    LatLonBounds bounds{};
     return bounds;
-}
 
+}
 
 std::vector<StreetSegmentIdx> findStreetSegmentsOfIntersection(IntersectionIdx intersection_id){
     return {};
@@ -479,7 +372,41 @@ double findFeatureArea(FeatureIdx feature_id){
 }
 
 double findWayLength(OSMID way_id){
-    return 0;
+    auto way_it = OSMWayFromID.find(way_id);
+    if (way_it == OSMWayFromID.end()) {
+        return 0.0;
+    }
+    //Gets the way from the id 
+    const OSMWay* way = way_it->second;
+
+    const std::vector<OSMID>& members = getWayMembers(way);
+    if (members.size() < 2) {
+        return 0;
+    }
+
+    double totalLength = 0;
+
+    //Iterate through nodes and sum the distances between two nodes 
+    for (size_t i = 0; i < members.size() - 1; ++i) {
+        OSMID id1 = members[i];
+        OSMID id2 = members[i+1];
+
+        //Gets the iterator for both ids 
+        auto node1it = LatLonFromOSMID.find(id1);
+        auto node2it = LatLonFromOSMID.find(id2);
+
+        if(node1it != LatLonFromOSMID.end() && node2it != LatLonFromOSMID.end()) {
+            //Get the LatLon of both ids 
+            LatLon node1Position = node1it->second;
+            LatLon node2Position = node2it->second;
+            
+            // Add the distance between these two points
+            totalLength += findDistanceBetweenTwoPoints({node1Position, node2Position});
+        }
+    }
+
+    return totalLength;
+
 }
 
 std::string getOSMNodeTagValue(OSMID osm_id, std::string key){
