@@ -50,6 +50,7 @@
 std::vector<std::pair<std::string, StreetIdx>> streetNametoId; //Used for findStreetIdsFromPartialStreetName
                                                                //Global to store street name and the street index 
 static std::vector<std::vector<IntersectionIdx>> street_to_intersections;
+std::vector<std::vector<StreetSegmentIdx>> intersection_to_segments; //Mimicks Hashmap used to map all ID's of street segments connected to an intersection
 
 //HELPER FUNCTION, removes spaces and makes string all lowercase 
 std::string cleanName(std::string name){
@@ -115,13 +116,23 @@ bool loadMap(std::string map_streets_database_filename) {
     street_to_intersections.clear();
     street_to_intersections.resize(getNumStreets());
 
-    for (StreetSegmentIdx i = 0; i < getNumStreetSegments(); i++) {
-        StreetSegmentInfo info = getStreetSegmentInfo(i);
+    // For findStreetSegmentsOfIntersection, we resize array on load when another intersection is added
+    intersection_to_segments.clear();
+    intersection_to_segments.resize(getNumIntersections());
 
-        // Every segment touches two intersections
+    for (StreetSegmentIdx seg = 0; seg < getNumStreetSegments(); seg++) {
+        StreetSegmentInfo info = getStreetSegmentInfo(seg);
+
+        // street -> intersections
         street_to_intersections[info.streetID].push_back(info.from);
         street_to_intersections[info.streetID].push_back(info.to);
+
+        // intersection -> segments
+        //Take from and to intersections and add the street segment to it
+        intersection_to_segments[info.from].push_back(seg);
+        intersection_to_segments[info.to].push_back(seg);
     }
+
     for (size_t i = 0; i < street_to_intersections.size(); i++) { 
 
         // Removing duplicate intersections in the vector
@@ -443,7 +454,8 @@ LatLonBounds findStreetBoundingBox (StreetIdx street_id){
 
 
 std::vector<StreetSegmentIdx> findStreetSegmentsOfIntersection(IntersectionIdx intersection_id){
-    return {};
+    //Return street segments corresponding to correct intersection in hashmap
+    return intersection_to_segments[intersection_id];
 }
 
 double findStreetLength(StreetIdx street_id){
