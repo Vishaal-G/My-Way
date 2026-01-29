@@ -32,6 +32,7 @@
 #include <limits> 
 #include <unordered_map> 
 #include <iterator>
+#include <tuple> 
 
 
 // loadMap will be called with the name of the file that stores the "layer-2"
@@ -73,6 +74,9 @@ std::unordered_map<std::string, std::vector<POIIdx>> POIbyName; //Allows you to 
 //Used for findWayLength 
 std::unordered_map<OSMID, const OSMWay*> OSMWayFromID;
 std::unordered_map<OSMID, LatLon> LatLonFromOSMID;
+
+//Used for getOSMNodeTagValue
+std::unordered_map<OSMID, const OSMNode*> OSMNodeFromID;
 
 bool loadMap(std::string map_streets_database_filename) {
     bool load_successful = loadStreetsDatabaseBIN(map_streets_database_filename);
@@ -134,7 +138,7 @@ bool loadMap(std::string map_streets_database_filename) {
         intersections.erase(std::unique(intersections.begin(), intersections.end()), intersections.end()); // Deletes streets that are not duplicates
     }
 
-    //For findWayLength 
+    //For findWayLength & getOSMNodeTagValue 
     std::string osm_filename = map_streets_database_filename; 
     std::string replace = ".streets.bin";
     std::string replaceWith = ".osm.bin";
@@ -150,14 +154,18 @@ bool loadMap(std::string map_streets_database_filename) {
         return false; // Indicates whether the map has loaded successfully
     }
 
-    // Populate the LatLonFromOSMID hashmap 
+    // Populate the LatLonFromOSMID and OSMNodeFromID hashmap 
     int numNodes = getNumberOfNodes(); 
     LatLonFromOSMID.clear(); 
     LatLonFromOSMID.reserve(numNodes); 
+    OSMNodeFromID.clear(); 
+    OSMNodeFromID.reserve(numNodes); 
 
     for(int i = 0; i < numNodes; ++i){
         const OSMNode* node = getNodeByIndex(i); 
         LatLonFromOSMID[node->id()] = getNodeCoords(node); 
+
+        OSMNodeFromID[node->id()] = node; 
     }
 
     // Populate the OSMWayFromID hashmap 
@@ -169,6 +177,7 @@ bool loadMap(std::string map_streets_database_filename) {
         const OSMWay* way = getWayByIndex(i); 
         OSMWayFromID[way->id()] = way;
     }
+  
 
 
     load_successful = true; //Make sure this is updated to reflect whether
@@ -180,6 +189,7 @@ bool loadMap(std::string map_streets_database_filename) {
 void closeMap() {
     OSMWayFromID.clear(); 
     LatLonFromOSMID.clear(); 
+    OSMNodeFromID.clear(); 
 
     closeOSMDatabase(); 
     //Clean-up your map related data structures here
@@ -560,6 +570,24 @@ double findWayLength(OSMID way_id){
 }
 
 std::string getOSMNodeTagValue(OSMID osm_id, std::string key){
-    return "";
+    auto it = OSMNodeFromID.find(osm_id); 
+
+    if(it == OSMNodeFromID.end())
+        return "";
+    
+    //Get the OSMNode of the ID 
+    const OSMNode* node = it->second; 
+
+    //Looks for the tag 
+    int numberOfTag = getTagCount(node); 
+    for(int i = 0; i < numberOfTag; ++i){
+        std::string currentKey, value; 
+        std::tie(currentKey, value) = getTagPair(node, i);
+
+        if(currentKey == key){
+            return value; 
+        }
+    }
+    return ""; 
 }
 
