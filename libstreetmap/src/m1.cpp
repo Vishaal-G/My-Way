@@ -21,6 +21,7 @@
 #include <iostream>
 #include "m1.h"
 #include "StreetsDatabaseAPI.h"
+#include "OSMDatabaseAPI.h"
 #include <cmath>
 #include <map> 
 #include <vector> 
@@ -31,6 +32,7 @@
 #include <limits> 
 #include <unordered_map> 
 #include <iterator>
+#include <tuple> 
 
 
 // loadMap will be called with the name of the file that stores the "layer-2"
@@ -70,6 +72,12 @@ std::vector<LatLon> pointsOfIntersections;
 std::vector<LatLon> POIPositions; //Stores LatLon of all the POIs
 std::unordered_map<std::string, std::vector<POIIdx>> POIbyName; //Allows you to look up all Indexes of a POI by name 
 
+//Used for findWayLength 
+std::unordered_map<OSMID, const OSMWay*> OSMWayFromID;
+std::unordered_map<OSMID, LatLon> LatLonFromOSMID;
+
+//Used for getOSMNodeTagValue
+std::unordered_map<OSMID, const OSMNode*> OSMNodeFromID;
 
 bool loadMap(std::string map_streets_database_filename) {
     bool load_successful = loadStreetsDatabaseBIN(map_streets_database_filename);
@@ -141,6 +149,48 @@ bool loadMap(std::string map_streets_database_filename) {
         intersections.erase(std::unique(intersections.begin(), intersections.end()), intersections.end()); // Deletes streets that are not duplicates
     }
 
+    //For findWayLength & getOSMNodeTagValue 
+    std::string osm_filename = map_streets_database_filename; 
+    std::string replace = ".streets.bin";
+    std::string replaceWith = ".osm.bin";
+
+    // Loads the OSM database 
+    size_t find = osm_filename.find(replace);
+    if (find != std::string::npos) {
+        osm_filename.replace(find, replace.length(), replaceWith); // Gets the OSM database filename
+    }
+
+    bool osm_load_successful = loadOSMDatabaseBIN(osm_filename);
+    if (!osm_load_successful) {
+        return false; // Indicates whether the map has loaded successfully
+    }
+
+    // Populate the LatLonFromOSMID and OSMNodeFromID hashmap 
+    int numNodes = getNumberOfNodes(); 
+    LatLonFromOSMID.clear(); 
+    LatLonFromOSMID.reserve(numNodes); 
+    OSMNodeFromID.clear(); 
+    OSMNodeFromID.reserve(numNodes); 
+
+    for(int i = 0; i < numNodes; ++i){
+        const OSMNode* node = getNodeByIndex(i); 
+        LatLonFromOSMID[node->id()] = getNodeCoords(node); 
+
+        OSMNodeFromID[node->id()] = node; 
+    }
+
+    // Populate the OSMWayFromID hashmap 
+    int numWays = getNumberOfWays();
+    OSMWayFromID.clear();
+    OSMWayFromID.reserve(numWays);
+
+    for (int i = 0; i < numWays; ++i) {
+        const OSMWay* way = getWayByIndex(i); 
+        OSMWayFromID[way->id()] = way;
+    }
+  
+
+
     load_successful = true; //Make sure this is updated to reflect whether
                             //loading the map succeeded or failed
 
@@ -148,6 +198,11 @@ bool loadMap(std::string map_streets_database_filename) {
 }
 
 void closeMap() {
+    OSMWayFromID.clear(); 
+    LatLonFromOSMID.clear(); 
+    OSMNodeFromID.clear(); 
+
+    closeOSMDatabase(); 
     //Clean-up your map related data structures here
     
 }
@@ -491,10 +546,60 @@ double findFeatureArea(FeatureIdx feature_id){
 }
 
 double findWayLength(OSMID way_id){
-    return 0;
+    auto way_it = OSMWayFromID.find(way_id);
+    if (way_it == OSMWayFromID.end()) {
+        return 0.0;
+    }
+    // Gets the way from the id 
+    const OSMWay* way = way_it->second;
+
+    const std::vector<OSMID>& members = getWayMembers(way);
+    if (members.size() < 2) {
+        return 0;
+    }
+
+    double totalLength = 0;
+
+    // Iterate through nodes and sum the distances between two nodes 
+    for (size_t i = 0; i < members.size() - 1; ++i) {
+        OSMID id1 = members[i];
+        OSMID id2 = members[i+1];
+
+        // Gets the iterator for both ids 
+        auto node1it = LatLonFromOSMID.find(id1);
+        auto node2it = LatLonFromOSMID.find(id2);
+
+        if(node1it != LatLonFromOSMID.end() && node2it != LatLonFromOSMID.end()) {
+            // Get the LatLon of both ids 
+            LatLon node1Position = node1it->second;
+            LatLon node2Position = node2it->second;
+            
+            // Add the distance between these two points
+            totalLength += findDistanceBetweenTwoPoints({node1Position, node2Position});
+        }
+    }
+    return totalLength;
 }
 
 std::string getOSMNodeTagValue(OSMID osm_id, std::string key){
-    return "";
+    auto it = OSMNodeFromID.find(osm_id); 
+
+    if(it == OSMNodeFromID.end())
+        return "";
+    
+    //Get the OSMNode of the ID 
+    const OSMNode* node = it->second; 
+
+    //Looks for the tag 
+    int numberOfTag = getTagCount(node); 
+    for(int i = 0; i < numberOfTag; ++i){
+        std::string currentKey, value; 
+        std::tie(currentKey, value) = getTagPair(node, i);
+
+        if(currentKey == key){
+            return value; 
+        }
+    }
+    return ""; 
 }
 
