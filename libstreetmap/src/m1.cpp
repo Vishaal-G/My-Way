@@ -48,6 +48,9 @@
 // ".streets" to ".osm" in the map_streets_database_filename to get the proper
 // name.
 
+//For OSM map 
+bool osm_loaded = false; 
+
 // Global variable declarations
 std::vector<std::pair<std::string, StreetIdx>> streetNametoId; //Used for findStreetIdsFromPartialStreetName
                                                                //Global to store street name and the street index 
@@ -83,6 +86,7 @@ std::unordered_map<OSMID, const OSMNode*> OSMNodeFromID;
 static std::vector<double> g_street_lengths;
 
 bool loadMap(std::string map_streets_database_filename) {
+    osm_loaded = false; 
     bool load_successful = loadStreetsDatabaseBIN(map_streets_database_filename);
     if (!load_successful) {
         return false; //Indicates whether the map has loaded successfully
@@ -90,7 +94,7 @@ bool loadMap(std::string map_streets_database_filename) {
 
     std::cout << "loadMap: " << map_streets_database_filename << std::endl;
 
-  
+    
     //For findStreetIdsFromPartialStreetName, need to first create structure to make look up time faster
     streetNametoId.clear(); //Clean up the map on each run 
     streetNametoId.reserve(getNumStreets());
@@ -172,37 +176,33 @@ bool loadMap(std::string map_streets_database_filename) {
         osm_filename.replace(find, replace.length(), replaceWith); // Gets the OSM database filename
     }
 
-    bool osm_load_successful = loadOSMDatabaseBIN(osm_filename);
-    if (!osm_load_successful) {
-        return false; // Indicates whether the map has loaded successfully
+    if(loadOSMDatabaseBIN(osm_filename)){
+        osm_loaded = true; 
+
+        // Populate the LatLonFromOSMID and OSMNodeFromID hashmap 
+        int numNodes = getNumberOfNodes(); 
+        LatLonFromOSMID.clear(); 
+        LatLonFromOSMID.reserve(numNodes); 
+        OSMNodeFromID.clear(); 
+        OSMNodeFromID.reserve(numNodes); 
+
+        for(int i = 0; i < numNodes; ++i){
+            const OSMNode* node = getNodeByIndex(i); 
+            LatLonFromOSMID[node->id()] = getNodeCoords(node); 
+
+            OSMNodeFromID[node->id()] = node; 
+        }
+
+        // Populate the OSMWayFromID hashmap 
+        int numWays = getNumberOfWays();
+        OSMWayFromID.clear();
+        OSMWayFromID.reserve(numWays);
+
+        for (int i = 0; i < numWays; ++i) {
+            const OSMWay* way = getWayByIndex(i); 
+            OSMWayFromID[way->id()] = way;
+        }
     }
-
-    // Populate the LatLonFromOSMID and OSMNodeFromID hashmap 
-    int numNodes = getNumberOfNodes(); 
-    LatLonFromOSMID.clear(); 
-    LatLonFromOSMID.reserve(numNodes); 
-    OSMNodeFromID.clear(); 
-    OSMNodeFromID.reserve(numNodes); 
-
-    for(int i = 0; i < numNodes; ++i){
-        const OSMNode* node = getNodeByIndex(i); 
-        LatLonFromOSMID[node->id()] = getNodeCoords(node); 
-
-        OSMNodeFromID[node->id()] = node; 
-    }
-
-    // Populate the OSMWayFromID hashmap 
-    int numWays = getNumberOfWays();
-    OSMWayFromID.clear();
-    OSMWayFromID.reserve(numWays);
-
-    for (int i = 0; i < numWays; ++i) {
-        const OSMWay* way = getWayByIndex(i); 
-        OSMWayFromID[way->id()] = way;
-    }
-  
-
-
     load_successful = true; //Make sure this is updated to reflect whether
                             //loading the map succeeded or failed
 
@@ -214,11 +214,24 @@ void closeMap() {
     LatLonFromOSMID.clear(); 
     OSMNodeFromID.clear(); 
 
-    closeOSMDatabase(); 
+    if(osm_loaded){
+        closeOSMDatabase(); 
+        osm_loaded = false; 
+    }
+
+    closeStreetDatabase(); 
+
     //Clean-up your map related data structures here
     //Cleaning streetLength data here
     g_street_lengths.clear();
     g_street_lengths.shrink_to_fit();
+    
+    streetNametoId.clear();
+    pointsOfIntersections.clear();
+    POIPositions.clear();
+    POIbyName.clear();
+    street_to_intersections.clear();
+    intersection_to_segments.clear();
     
 }
 
