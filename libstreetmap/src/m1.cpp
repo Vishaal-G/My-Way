@@ -79,6 +79,9 @@ std::unordered_map<OSMID, LatLon> LatLonFromOSMID;
 //Used for getOSMNodeTagValue
 std::unordered_map<OSMID, const OSMNode*> OSMNodeFromID;
 
+//Used for computing street length
+static std::vector<double> g_street_lengths;
+
 bool loadMap(std::string map_streets_database_filename) {
     bool load_successful = loadStreetsDatabaseBIN(map_streets_database_filename);
     if (!load_successful) {
@@ -128,8 +131,17 @@ bool loadMap(std::string map_streets_database_filename) {
     intersection_to_segments.clear();
     intersection_to_segments.resize(getNumIntersections());
 
+    //For findStreetLength, we resize array on load
+    g_street_lengths.clear();
+    g_street_lengths.resize(getNumStreets(), 0.0);
+
+    
     for (StreetSegmentIdx seg = 0; seg < getNumStreetSegments(); seg++) {
         StreetSegmentInfo info = getStreetSegmentInfo(seg);
+
+        //Mapping each street ID of a segment to a length
+        g_street_lengths[info.streetID] += findStreetSegmentLength(seg);
+
 
         // street -> intersections
         street_to_intersections[info.streetID].push_back(info.from);
@@ -204,6 +216,9 @@ void closeMap() {
 
     closeOSMDatabase(); 
     //Clean-up your map related data structures here
+    //Cleaning streetLength data here
+    g_street_lengths.clear();
+    g_street_lengths.shrink_to_fit();
     
 }
 
@@ -514,7 +529,7 @@ std::vector<StreetSegmentIdx> findStreetSegmentsOfIntersection(IntersectionIdx i
 }
 
 double findStreetLength(StreetIdx street_id){
-    return 0;
+    return g_street_lengths[street_id];
 }
 
 POIIdx findClosestPOI(LatLon my_position, std::string poi_name){
