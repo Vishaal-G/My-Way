@@ -48,6 +48,8 @@
 // ".streets" to ".osm" in the map_streets_database_filename to get the proper
 // name.
 
+//To check if the OSMdatabase opens successfully 
+bool osm_loaded = false;
 // Global variable declarations
 std::vector<std::pair<std::string, StreetIdx>> streetNametoId; //Used for findStreetIdsFromPartialStreetName
                                                                //Global to store street name and the street index 
@@ -172,37 +174,36 @@ bool loadMap(std::string map_streets_database_filename) {
         osm_filename.replace(find, replace.length(), replaceWith); // Gets the OSM database filename
     }
 
+    osm_loaded = false;
     bool osm_load_successful = loadOSMDatabaseBIN(osm_filename);
-    if (!osm_load_successful) {
-        return false; // Indicates whether the map has loaded successfully
+
+    if (osm_load_successful) {
+        osm_loaded = true; 
+
+        // Populate the LatLonFromOSMID and OSMNodeFromID hashmap 
+        int numNodes = getNumberOfNodes(); 
+        LatLonFromOSMID.clear(); 
+        LatLonFromOSMID.reserve(numNodes); 
+        OSMNodeFromID.clear(); 
+        OSMNodeFromID.reserve(numNodes); 
+
+        for(int i = 0; i < numNodes; ++i){
+            const OSMNode* node = getNodeByIndex(i); 
+            LatLonFromOSMID[node->id()] = getNodeCoords(node); 
+
+            OSMNodeFromID[node->id()] = node; 
+        }
+
+        // Populate the OSMWayFromID hashmap 
+        int numWays = getNumberOfWays();
+        OSMWayFromID.clear();
+        OSMWayFromID.reserve(numWays);
+
+        for (int i = 0; i < numWays; ++i) {
+            const OSMWay* way = getWayByIndex(i); 
+            OSMWayFromID[way->id()] = way;
+        }
     }
-
-    // Populate the LatLonFromOSMID and OSMNodeFromID hashmap 
-    int numNodes = getNumberOfNodes(); 
-    LatLonFromOSMID.clear(); 
-    LatLonFromOSMID.reserve(numNodes); 
-    OSMNodeFromID.clear(); 
-    OSMNodeFromID.reserve(numNodes); 
-
-    for(int i = 0; i < numNodes; ++i){
-        const OSMNode* node = getNodeByIndex(i); 
-        LatLonFromOSMID[node->id()] = getNodeCoords(node); 
-
-        OSMNodeFromID[node->id()] = node; 
-    }
-
-    // Populate the OSMWayFromID hashmap 
-    int numWays = getNumberOfWays();
-    OSMWayFromID.clear();
-    OSMWayFromID.reserve(numWays);
-
-    for (int i = 0; i < numWays; ++i) {
-        const OSMWay* way = getWayByIndex(i); 
-        OSMWayFromID[way->id()] = way;
-    }
-  
-
-
     load_successful = true; //Make sure this is updated to reflect whether
                             //loading the map succeeded or failed
 
@@ -210,16 +211,28 @@ bool loadMap(std::string map_streets_database_filename) {
 }
 
 void closeMap() {
-    OSMWayFromID.clear(); 
-    LatLonFromOSMID.clear(); 
-    OSMNodeFromID.clear(); 
 
-    closeOSMDatabase(); 
     //Clean-up your map related data structures here
     //Cleaning streetLength data here
     g_street_lengths.clear();
     g_street_lengths.shrink_to_fit();
     
+    streetNametoId.clear();
+    pointsOfIntersections.clear();
+    POIPositions.clear();
+    POIbyName.clear();
+    street_to_intersections.clear();
+    intersection_to_segments.clear();
+
+    if(osm_loaded){
+        OSMWayFromID.clear(); 
+        LatLonFromOSMID.clear(); 
+        OSMNodeFromID.clear();
+        closeOSMDatabase(); 
+        osm_loaded = false; 
+    }
+
+    closeStreetDatabase();   
 }
 
 double findDistanceBetweenTwoPoints(std::pair<LatLon, LatLon> points){
