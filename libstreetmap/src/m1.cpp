@@ -393,7 +393,38 @@ double findStreetSegmentTurnAngle(StreetSegmentIdx dst_street_segment_id, Street
 
 
 std::vector<IntersectionIdx> findAdjacentIntersections(IntersectionIdx intersection_id){
-    return {};
+
+    std::vector<IntersectionIdx> adjacent;
+
+    // Number of street segments at intersection
+    int num_segments = getNumIntersectionStreetSegment(intersection_id);
+
+    for (int i = 0; i < num_segments; i++) {
+
+        StreetSegmentIdx seg_id = getIntersectionStreetSegment(intersection_id, i);
+        StreetSegmentInfo info = getStreetSegmentInfo(seg_id);
+
+        // One-way
+        if (info.oneWay) {
+            if (info.from == intersection_id) {
+                adjacent.push_back(info.to);
+            }
+        }
+        // Two-way
+        else {
+            if (info.from == intersection_id) {
+                adjacent.push_back(info.to);
+            } else {
+                adjacent.push_back(info.from);
+            }
+        }
+    }
+
+    // Removing duplciates
+    std::sort(adjacent.begin(), adjacent.end());
+    adjacent.erase(std::unique(adjacent.begin(), adjacent.end()), adjacent.end());
+
+    return adjacent;
 }
 
 IntersectionIdx findClosestIntersection(LatLon my_position){
