@@ -628,6 +628,42 @@ double findFeatureArea(FeatureIdx feature_id){
     return 0.5 * std::abs(signed_area);
 }
 
+double findWayLength(OSMID way_id){
+    auto way_it = OSMWayFromID.find(way_id);
+    if (way_it == OSMWayFromID.end()) {
+        return 0.0;
+    }
+    // Gets the way from the id 
+    const OSMWay* way = way_it->second;
+
+    const std::vector<OSMID>& members = getWayMembers(way);
+    if (members.size() < 2) {
+        return 0;
+    }
+
+    double totalLength = 0;
+
+    // Iterate through nodes and sum the distances between two nodes 
+    for (size_t i = 0; i < members.size() - 1; ++i) {
+        OSMID id1 = members[i];
+        OSMID id2 = members[i+1];
+
+        // Gets the iterator for both ids 
+        auto node1it = LatLonFromOSMID.find(id1);
+        auto node2it = LatLonFromOSMID.find(id2);
+
+        if(node1it != LatLonFromOSMID.end() && node2it != LatLonFromOSMID.end()) {
+            // Get the LatLon of both ids 
+            LatLon node1Position = node1it->second;
+            LatLon node2Position = node2it->second;
+            
+            // Add the distance between these two points
+            totalLength += findDistanceBetweenTwoPoints({node1Position, node2Position});
+        }
+    }
+    return totalLength;
+}
+
 std::string getOSMNodeTagValue(OSMID osm_id, std::string key){
     auto it = OSMNodeFromID.find(osm_id); 
 
