@@ -48,8 +48,6 @@
 // ".streets" to ".osm" in the map_streets_database_filename to get the proper
 // name.
 
-//To check if the OSMdatabase opens successfully 
-bool osm_loaded = false;
 // Global variable declarations
 std::vector<std::pair<std::string, StreetIdx>> streetNametoId; //Used for findStreetIdsFromPartialStreetName
                                                                //Global to store street name and the street index 
@@ -174,36 +172,37 @@ bool loadMap(std::string map_streets_database_filename) {
         osm_filename.replace(find, replace.length(), replaceWith); // Gets the OSM database filename
     }
 
-    osm_loaded = false;
     bool osm_load_successful = loadOSMDatabaseBIN(osm_filename);
-
-    if (osm_load_successful) {
-        osm_loaded = true; 
-
-        // Populate the LatLonFromOSMID and OSMNodeFromID hashmap 
-        int numNodes = getNumberOfNodes(); 
-        LatLonFromOSMID.clear(); 
-        LatLonFromOSMID.reserve(numNodes); 
-        OSMNodeFromID.clear(); 
-        OSMNodeFromID.reserve(numNodes); 
-
-        for(int i = 0; i < numNodes; ++i){
-            const OSMNode* node = getNodeByIndex(i); 
-            LatLonFromOSMID[node->id()] = getNodeCoords(node); 
-
-            OSMNodeFromID[node->id()] = node; 
-        }
-
-        // Populate the OSMWayFromID hashmap 
-        int numWays = getNumberOfWays();
-        OSMWayFromID.clear();
-        OSMWayFromID.reserve(numWays);
-
-        for (int i = 0; i < numWays; ++i) {
-            const OSMWay* way = getWayByIndex(i); 
-            OSMWayFromID[way->id()] = way;
-        }
+    if (!osm_load_successful) {
+        return false; // Indicates whether the map has loaded successfully
     }
+
+    // Populate the LatLonFromOSMID and OSMNodeFromID hashmap 
+    int numNodes = getNumberOfNodes(); 
+    LatLonFromOSMID.clear(); 
+    LatLonFromOSMID.reserve(numNodes); 
+    OSMNodeFromID.clear(); 
+    OSMNodeFromID.reserve(numNodes); 
+
+    for(int i = 0; i < numNodes; ++i){
+        const OSMNode* node = getNodeByIndex(i); 
+        LatLonFromOSMID[node->id()] = getNodeCoords(node); 
+
+        OSMNodeFromID[node->id()] = node; 
+    }
+
+    // Populate the OSMWayFromID hashmap 
+    int numWays = getNumberOfWays();
+    OSMWayFromID.clear();
+    OSMWayFromID.reserve(numWays);
+
+    for (int i = 0; i < numWays; ++i) {
+        const OSMWay* way = getWayByIndex(i); 
+        OSMWayFromID[way->id()] = way;
+    }
+  
+
+
     load_successful = true; //Make sure this is updated to reflect whether
                             //loading the map succeeded or failed
 
@@ -211,28 +210,16 @@ bool loadMap(std::string map_streets_database_filename) {
 }
 
 void closeMap() {
+    OSMWayFromID.clear(); 
+    LatLonFromOSMID.clear(); 
+    OSMNodeFromID.clear(); 
 
+    closeOSMDatabase(); 
     //Clean-up your map related data structures here
     //Cleaning streetLength data here
     g_street_lengths.clear();
     g_street_lengths.shrink_to_fit();
     
-    streetNametoId.clear();
-    pointsOfIntersections.clear();
-    POIPositions.clear();
-    POIbyName.clear();
-    street_to_intersections.clear();
-    intersection_to_segments.clear();
-
-    if(osm_loaded){
-        OSMWayFromID.clear(); 
-        LatLonFromOSMID.clear(); 
-        OSMNodeFromID.clear();
-        closeOSMDatabase(); 
-        osm_loaded = false; 
-    }
-
-    closeStreetDatabase();   
 }
 
 double findDistanceBetweenTwoPoints(std::pair<LatLon, LatLon> points){
@@ -600,81 +587,53 @@ POIIdx findClosestPOI(LatLon my_position, std::string poi_name){
     return answer;
 }
 
-double findFeatureArea(FeatureIdx feature_id){
+    double findFeatureArea(FeatureIdx feature_id){
+
     int num_points = getNumFeaturePoints(feature_id);
 
-    // Check if valid polygon 
-    if (num_points < 3){
+    // Ensure closed polygon (need four points)
+    if (num_points < 4) {
         return 0.0;
     }
 
     std::vector<LatLon> points;
-     // Feature must be closed (first point equals last point)
-    LatLon first = points.front();
-    LatLon last  = points.back();
+    points.reserve(num_points);
+
+    for (int i = 0; i < num_points; i++) {
+        points.push_back(getFeaturePoint(feature_id, i));
+    }
+
+    // Must be closed (first = last)
+    LatLon first = points[0];
+    LatLon last  = points[points.size() - 1];
 
     if (first.latitude() != last.latitude() ||
         first.longitude() != last.longitude()) {
         return 0.0;
     }
 
-    // Compute avg latitude for projection
+    // Average latitude for projection
     double lat_sum = 0.0;
-    for (int i = 0; i < num_points; i++) {
+    for (int i = 0; i < (int)points.size(); i++) {
         lat_sum += points[i].latitude() * kDegreeToRadian;
     }
-    double avg_lat = lat_sum / num_points;
+    double avg_lat = lat_sum / points.size();
 
-    // Shoelace formula - m
+    // Shoelace formula 
     double signed_area = 0.0;
-
-    for (int i = 0; i < num_points - 1; i++) {
-
+    for (int i = 0; i < (int)points.size() - 1; i++) {
         LatLon p1 = points[i];
         LatLon p2 = points[i + 1];
-        double x1 = kEarthRadiusInMeters * p1.longitude() * kDegreeToRadian * cos(avg_lat);
-        double y1 = kEarthRadiusInMeters * p1.latitude() * kDegreeToRadian;
-        double x2 = kEarthRadiusInMeters * p2.longitude() * kDegreeToRadian * cos(avg_lat);
-        double y2 = kEarthRadiusInMeters * p2.latitude() * kDegreeToRadian;
+
+        double x1 = kEarthRadiusInMeters * (p1.longitude() * kDegreeToRadian) * cos(avg_lat);
+        double y1 = kEarthRadiusInMeters * (p1.latitude()  * kDegreeToRadian);
+
+        double x2 = kEarthRadiusInMeters * (p2.longitude() * kDegreeToRadian) * cos(avg_lat);
+        double y2 = kEarthRadiusInMeters * (p2.latitude()  * kDegreeToRadian);
+
         signed_area += (x1 * y2 - x2 * y1);
     }
     return 0.5 * std::abs(signed_area);
-}
-
-double findWayLength(OSMID way_id){
-    auto way_it = OSMWayFromID.find(way_id);
-    if (way_it == OSMWayFromID.end()) {
-        return 0.0;
-    }
-    // Gets the way from the id 
-    const OSMWay* way = way_it->second;
-
-    const std::vector<OSMID>& members = getWayMembers(way);
-    if (members.size() < 2) {
-        return 0;
-    }
-
-    double totalLength = 0;
-
-    // Iterate through nodes and sum the distances between two nodes 
-    for (size_t i = 0; i < members.size() - 1; ++i) {
-        OSMID id1 = members[i];
-        OSMID id2 = members[i+1];
-
-        // Gets the iterator for both ids 
-        auto node1it = LatLonFromOSMID.find(id1);
-        auto node2it = LatLonFromOSMID.find(id2);
-
-        if(node1it != LatLonFromOSMID.end() && node2it != LatLonFromOSMID.end()) {
-            // Get the LatLon of both ids 
-            LatLon node1Position = node1it->second;
-            LatLon node2Position = node2it->second;
-            
-            // Add the distance between these two points
-            totalLength += findDistanceBetweenTwoPoints({node1Position, node2Position});
-        }
-    }
-    return totalLength;
 }
 
 std::string getOSMNodeTagValue(OSMID osm_id, std::string key){
