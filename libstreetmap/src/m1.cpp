@@ -600,46 +600,60 @@ POIIdx findClosestPOI(LatLon my_position, std::string poi_name){
     return answer;
 }
 
-double findFeatureArea(FeatureIdx feature_id){
+double findFeatureArea(FeatureIdx feature_id) {
+
     int num_points = getNumFeaturePoints(feature_id);
 
-    // Check if valid polygon 
-    if (num_points < 3){
+    // Closed polygon check
+    if (num_points < 4) {
         return 0.0;
     }
 
+    // Load all feature points
     std::vector<LatLon> points;
-     // Feature must be closed (first point equals last point)
-    LatLon first = points.front();
-    LatLon last  = points.back();
+    points.reserve(num_points);
+    for (int i = 0; i < num_points; i++) {
+        points.push_back(getFeaturePoint(feature_id, i));
+    }
+
+    // Feature must be closed (first = last)
+    LatLon first = points[0];
+    LatLon last  = points[(int)points.size() - 1];
 
     if (first.latitude() != last.latitude() ||
         first.longitude() != last.longitude()) {
         return 0.0;
     }
 
-    // Compute avg latitude for projection
+    // Compute average latitude for projection (rad)
     double lat_sum = 0.0;
-    for (int i = 0; i < num_points; i++) {
+    for (int i = 0; i < (int)points.size(); i++) {
         lat_sum += points[i].latitude() * kDegreeToRadian;
     }
-    double avg_lat = lat_sum / num_points;
+    double avg_lat = lat_sum / points.size();
 
-    // Shoelace formula - m
+    // Shoelace formula 
     double signed_area = 0.0;
 
-    for (int i = 0; i < num_points - 1; i++) {
-
+    for (int i = 0; i < (int)points.size() - 1; i++) {
         LatLon p1 = points[i];
         LatLon p2 = points[i + 1];
-        double x1 = kEarthRadiusInMeters * p1.longitude() * kDegreeToRadian * cos(avg_lat);
-        double y1 = kEarthRadiusInMeters * p1.latitude() * kDegreeToRadian;
-        double x2 = kEarthRadiusInMeters * p2.longitude() * kDegreeToRadian * cos(avg_lat);
-        double y2 = kEarthRadiusInMeters * p2.latitude() * kDegreeToRadian;
+        double x1 = kEarthRadiusInMeters *
+                    (p1.longitude() * kDegreeToRadian) * cos(avg_lat);
+        double y1 = kEarthRadiusInMeters *
+                    (p1.latitude() * kDegreeToRadian);
+
+        double x2 = kEarthRadiusInMeters *
+                    (p2.longitude() * kDegreeToRadian) * cos(avg_lat);
+        double y2 = kEarthRadiusInMeters *
+                    (p2.latitude() * kDegreeToRadian);
+
         signed_area += (x1 * y2 - x2 * y1);
     }
+
     return 0.5 * std::abs(signed_area);
 }
+
 
 double findWayLength(OSMID way_id){
     auto way_it = OSMWayFromID.find(way_id);
