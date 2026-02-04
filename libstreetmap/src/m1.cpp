@@ -48,6 +48,21 @@
 // ".streets" to ".osm" in the map_streets_database_filename to get the proper
 // name.
 
+//For findClosestIntersection, make a 2D array that consists of vectors of IntersectionIds
+//To create this array, for every intersection, find the LatLon, and then normalize it to calculate the index of this intersection in the array 
+//For findClosestIntersection, simply calculate the index of the LatLon parameter, and then you can find the closest intersection through the predetermined grid 
+
+//Grid has a vector of IntersectionIdx called intersections 
+struct Grid{
+    std::vector<IntersectionIdx> intersections; 
+};
+//Create the 2d grid, (vectors within vectors) 
+std::vector<std::vector<Grid>> intersectionsGrid;
+
+double minLat, maxLat, minLon, maxLon, latGridSize, lonGridSize; 
+int gridRows = 100; 
+int gridCols = 100; 
+
 //To check if the OSMdatabase opens successfully 
 bool osm_loaded = false;
 // Global variable declarations
@@ -104,11 +119,48 @@ bool loadMap(std::string map_streets_database_filename) {
     }
     std::sort(streetNametoId.begin(), streetNametoId.end()); //Sorts the street names by alphabetical order 
     
-    //For findClosestIntersection, stores all the LatLons of the intersections for faster lookup time 
-    int numOfIntersections = getNumIntersections(); 
-    pointsOfIntersections.resize(numOfIntersections); 
-    for(int i = 0; i < numOfIntersections; ++i){
-        pointsOfIntersections[i] = getIntersectionPosition(i); 
+    //For findClosestIntersection, 
+    maxLat = -91.0, minLat = 91.0; 
+    maxLon = -181.0, minLon = 181.0; 
+
+    int numberIntersections = getNumIntersections(); 
+
+    if(numberIntersections > 0){
+        for(int i = 0; i < numberIntersections; i++){
+            LatLon position = getIntersectionPosition(i);
+            maxLat = std::max(maxLat, position.latitude());
+            minLat = std::min(minLat, position.latitude());
+            maxLon = std::max(maxLon, position.longitude());
+            minLon = std::min(minLon, position.longitude());
+        }
+
+        latGridSize = (maxLat - minLat) / gridRows; 
+        lonGridSize = (maxLon - minLon) / gridCols; 
+
+        if (latGridSize <= 0) 
+            latGridSize = 0.00001;
+        if (lonGridSize <= 0) 
+            lonGridSize = 0.00001;
+
+        intersectionsGrid.clear(); 
+        intersectionsGrid.resize(gridCols, std::vector<Grid>(gridRows)); 
+
+        for (int i = 0; i < numberIntersections; i++) {
+            LatLon position = getIntersectionPosition(i);
+            
+            int col = (position.longitude() - minLon) / lonGridSize;
+            int row = (position.latitude() - minLat) / latGridSize;
+
+            // Clamp indices to valid range (0 to 254)
+            // Points exactly on the max edge might calculate to index 255
+            if (col >= gridCols) col = gridCols - 1;
+            if (row >= gridRows) row = gridRows - 1;
+            if (col < 0) col = 0;
+            if (row < 0) row = 0;
+
+            // Store intersection ID in the calculated cell
+            intersectionsGrid[col][row].intersections.push_back(i);
+        }
     }
 
     //For findClosestPOI
@@ -236,6 +288,11 @@ void closeMap() {
     street_to_intersections.clear();
     intersection_to_segments.clear();
     streetseg_travel_time.clear();
+
+    for(int i = 0; i < intersectionsGrid.size(); i++){
+        intersectionsGrid[i].clear(); 
+    }
+    intersectionsGrid.clear(); 
 
     if(osm_loaded){
         OSMWayFromID.clear(); 
@@ -446,25 +503,98 @@ std::vector<IntersectionIdx> findAdjacentIntersections(IntersectionIdx intersect
     return adjacent;
 }
 
-IntersectionIdx findClosestIntersection(LatLon my_position){
+
+IntersectionIdx findClosestIntersection(LatLon my_position) {
+    int start_col = (my_position.longitude() - minLon) / lonGridSize;
+    int start_row = (my_position.latitude() - minLat) / latGridSize;
+    if (start_col >= gridCols) start_col = gridCols - 1;
+    if (start_row >= gridRows) start_row = gridRows - 1;
+    if (start_col < 0) start_col = 0;
+    if (start_row < 0) start_row = 0;
     
-    //Edge case where there are no points of intersections 
-    if(pointsOfIntersections.empty())
-        return -1; 
-
-    IntersectionIdx answer; 
-    double minDistance = std::numeric_limits<double>::max(); //Makes minDistance largest possible number 
-
-    //Gets distance from my_position to every intersection to find the lowest distance one
-    for(int i = 0; i < pointsOfIntersections.size(); i++){
-        double distance = findDistanceBetweenTwoPoints(std::make_pair(my_position, pointsOfIntersections[i])); 
-        if(distance < minDistance){
-            minDistance = distance; 
-            answer = i; 
-        }   
-    }   
-    return answer;
+    IntersectionIdx nearest_id = -1;
+    double min_dist = std::numeric_limits<double>::max();
+    int max_radius = std::max(gridCols, gridRows);
+    
+    std::vector<IntersectionIdx> candidates;
+    const double EPSILON = 0.0001;
+    
+    for (int radius = 0; radius < max_radius; radius++) {
+        
+        int min_c = std::max(0, start_col - radius);
+        int max_c = std::min(gridCols - 1, start_col + radius);
+        int min_r = std::max(0, start_row - radius);
+        int max_r = std::min(gridRows - 1, start_row + radius);
+        
+        for (int c = min_c; c <= max_c; c++) {
+            for (int r = min_r; r <= max_r; r++) {
+                if (radius > 0 && c > min_c && c < max_c && r > min_r && r < max_r) {
+                    continue;
+                }
+                
+                for (IntersectionIdx id : intersectionsGrid[c][r].intersections) {
+                    double dist = findDistanceBetweenTwoPoints(std::make_pair(my_position, getIntersectionPosition(id)));
+                    
+                    if (dist < min_dist - EPSILON) {
+                        min_dist = dist;
+                        nearest_id = id;
+                        candidates.clear();
+                        candidates.push_back(id);
+                    }
+                    else if (std::abs(dist - min_dist) <= EPSILON) {
+                        if (nearest_id == -1) {
+                            nearest_id = id;
+                        }
+                        candidates.push_back(id);
+                    }
+                }
+            }
+        }
+        
+        // Early exit strategy: only stop when we're absolutely sure
+        if (nearest_id != -1) {
+            // Calculate how far the next ring of cells could possibly extend
+            // We need to be conservative here to ensure correctness
+            
+            // Distance from query point to the edge of the next ring (in grid cells)
+            double next_ring_distance_cells = radius + 1;
+            
+            // Convert to actual distance (meters)
+            // Account for latitude/longitude scaling
+            double lat_meters_per_cell = latGridSize * kEarthRadiusInMeters * kDegreeToRadian;
+            double lon_meters_per_cell = lonGridSize * kEarthRadiusInMeters * kDegreeToRadian * 
+                                         std::cos(my_position.latitude() * kDegreeToRadian);
+            
+            // Maximum cell diagonal (worst case distance within a cell)
+            double max_cell_diagonal = std::sqrt(lat_meters_per_cell * lat_meters_per_cell + 
+                                                 lon_meters_per_cell * lon_meters_per_cell);
+            
+            // Minimum distance to any point in the next ring
+            // Subtract cell diagonal because a point at the edge of the next ring's cells
+            // could be closer than the ring distance suggests
+            double min_possible_dist_next_ring = (next_ring_distance_cells * std::min(lat_meters_per_cell, lon_meters_per_cell)) 
+                                                 - max_cell_diagonal;
+            
+            // Only exit if our best is definitely closer
+            if (min_dist < min_possible_dist_next_ring) {
+                break;
+            }
+        }
+        
+        // Absolute stop: we've searched the entire grid
+        if (min_c == 0 && max_c == gridCols - 1 && min_r == 0 && max_r == gridRows - 1) {
+            break;
+        }
+    }
+    
+    if (!candidates.empty()) {
+        nearest_id = *std::min_element(candidates.begin(), candidates.end());
+    }
+    
+    return nearest_id;
 }
+ 
+
 
 std::vector<IntersectionIdx> findIntersectionsOfStreet(StreetIdx street_id){
     return street_to_intersections[street_id];
@@ -523,10 +653,10 @@ std::vector<StreetIdx> findStreetIdsFromPartialStreetName(std::string street_pre
 LatLonBounds findStreetBoundingBox (StreetIdx street_id){
     //Set minimum to biggest possible number initially 
     //Set maximum to smallest possible number intially 
-    double minLat = std::numeric_limits<double>::max();
-    double maxLat = std::numeric_limits<double>::lowest();
-    double minLon = std::numeric_limits<double>::max();
-    double maxLon = std::numeric_limits<double>::lowest();
+    double minimumLat = std::numeric_limits<double>::max();
+    double maximumLat = std::numeric_limits<double>::lowest();
+    double minimumLon = std::numeric_limits<double>::max();
+    double maximumLon = std::numeric_limits<double>::lowest();
 
     //Loop through every street segment and only process the ones that belong to street_id
     for (StreetSegmentIdx seg = 0; seg < getNumStreetSegments(); seg++){
@@ -543,32 +673,32 @@ LatLonBounds findStreetBoundingBox (StreetIdx street_id){
         LatLon toPos   = getIntersectionPosition(info.to);
 
         //Update min/max values checking the starting point of segment
-        minLat = std::min(minLat, fromPos.latitude());
-        maxLat = std::max(maxLat, fromPos.latitude());
-        minLon = std::min(minLon, fromPos.longitude());
-        maxLon = std::max(maxLon, fromPos.longitude());
+        minimumLat = std::min(minimumLat, fromPos.latitude());
+        maximumLat = std::max(maximumLat, fromPos.latitude());
+        minimumLon = std::min(minimumLon, fromPos.longitude());
+        maximumLon = std::max(maximumLon, fromPos.longitude());
 
         //Update min/max values checking the destination point of segment
-        minLat = std::min(minLat, toPos.latitude());
-        maxLat = std::max(maxLat, toPos.latitude());
-        minLon = std::min(minLon, toPos.longitude());
-        maxLon = std::max(maxLon, toPos.longitude());
+        minimumLat = std::min(minimumLat, toPos.latitude());
+        maximumLat = std::max(maximumLat, toPos.latitude());
+        minimumLon = std::min(minimumLon, toPos.longitude());
+        maximumLon = std::max(maximumLon, toPos.longitude());
 
         //Check if curve points have new max/min long/lat
         for (int i = 0; i < info.numCurvePoints; i++){
             LatLon cp = getStreetSegmentCurvePoint(seg, i);
 
-            minLat = std::min(minLat, cp.latitude());
-            maxLat = std::max(maxLat, cp.latitude());
-            minLon = std::min(minLon, cp.longitude());
-            maxLon = std::max(maxLon, cp.longitude());
+            minimumLat = std::min(minimumLat, cp.latitude());
+            maximumLat = std::max(maximumLat, cp.latitude());
+            minimumLon = std::min(minimumLon, cp.longitude());
+            maximumLon = std::max(maximumLon, cp.longitude());
         }
     }
 
     //Create a new LatLonBounds object to update max/min values
     LatLonBounds bounds;
-    bounds.min = LatLon(minLat, minLon);
-    bounds.max = LatLon(maxLat, maxLon);
+    bounds.min = LatLon(minimumLat, minimumLon);
+    bounds.max = LatLon(maximumLat, maximumLon);
     return bounds;
 }
 
