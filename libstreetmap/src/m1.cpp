@@ -55,6 +55,7 @@ std::vector<std::pair<std::string, StreetIdx>> streetNametoId; //Used for findSt
                                                                //Global to store street name and the street index 
 static std::vector<std::vector<IntersectionIdx>> street_to_intersections;
 std::vector<std::vector<StreetSegmentIdx>> intersection_to_segments; //Mimicks Hashmap used to map all ID's of street segments connected to an intersection
+std::vector<double> streetseg_travel_time;
 
 //HELPER FUNCTION, removes spaces and makes string all lowercase 
 std::string cleanName(std::string name){
@@ -204,10 +205,21 @@ bool loadMap(std::string map_streets_database_filename) {
             OSMWayFromID[way->id()] = way;
         }
     }
-    load_successful = true; //Make sure this is updated to reflect whether
-                            //loading the map succeeded or failed
 
-    return load_successful;
+    // For findStreetSegmentTravelTime 
+    streetseg_travel_time.clear();
+    streetseg_travel_time.resize(getNumStreetSegments());
+
+    for (StreetSegmentIdx seg = 0; seg < getNumStreetSegments(); seg++) {
+        StreetSegmentInfo info = getStreetSegmentInfo(seg);
+
+        double length_m = findStreetSegmentLength(seg); // meters
+        double speed_mps = info.speedLimit;           
+        streetseg_travel_time[seg] = length_m / speed_mps; // Precompute and store travel times for every street segment
+    }
+        load_successful = true; //Make sure this is updated to reflect whether
+                                //loading the map succeeded or failed
+        return load_successful;
 }
 
 void closeMap() {
@@ -223,6 +235,7 @@ void closeMap() {
     POIbyName.clear();
     street_to_intersections.clear();
     intersection_to_segments.clear();
+    streetseg_travel_time.clear();
 
     if(osm_loaded){
         OSMWayFromID.clear(); 
@@ -287,14 +300,7 @@ double findStreetSegmentLength(StreetSegmentIdx street_segment_id){
 }
 
 double findStreetSegmentTravelTime(StreetSegmentIdx street_segment_id){
-    // Load street data
-    StreetSegmentInfo info = getStreetSegmentInfo(street_segment_id);
-
-    // Finding time using distance/speed
-    double length = findStreetSegmentLength(street_segment_id); // m
-    double speed = info.speedLimit; // metres/s
-
-    return length / speed;
+    return streetseg_travel_time[street_segment_id];
 }
 
 double findStreetSegmentTurnAngle(StreetSegmentIdx dst_street_segment_id, StreetSegmentIdx src_street_segment_id){
