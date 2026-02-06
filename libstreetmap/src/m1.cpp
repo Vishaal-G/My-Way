@@ -83,9 +83,6 @@ std::string cleanName(std::string name){
     return cleaned; 
 }
 
-//Used for findClosestIntersection 
-std::vector<LatLon> pointsOfIntersections;
-
 //Used for findClosestPOI
 std::vector<LatLon> POIPositions; //Stores LatLon of all the POIs
 std::unordered_map<std::string, std::vector<POIIdx>> POIbyName; //Allows you to look up all Indexes of a POI by name 
@@ -282,7 +279,6 @@ void closeMap() {
     g_street_lengths.shrink_to_fit();
     
     streetNametoId.clear();
-    pointsOfIntersections.clear();
     POIPositions.clear();
     POIbyName.clear();
     street_to_intersections.clear();
@@ -505,42 +501,58 @@ std::vector<IntersectionIdx> findAdjacentIntersections(IntersectionIdx intersect
 
 
 IntersectionIdx findClosestIntersection(LatLon my_position) {
+    //Finds the grid cell that contains the position of my_position 
     int start_col = (my_position.longitude() - minLon) / lonGridSize;
     int start_row = (my_position.latitude() - minLat) / latGridSize;
-    if (start_col >= gridCols) start_col = gridCols - 1;
-    if (start_row >= gridRows) start_row = gridRows - 1;
-    if (start_col < 0) start_col = 0;
-    if (start_row < 0) start_row = 0;
+    //On edge cases where the position might be out of the map 
+    if (start_col >= gridCols) 
+        start_col = gridCols - 1;
+    if (start_row >= gridRows) 
+        start_row = gridRows - 1;
+    if (start_col < 0) 
+        start_col = 0;
+    if (start_row < 0) 
+        start_row = 0;
     
+    //Used to search through the grid 
     IntersectionIdx nearest_id = -1;
-    double min_dist = std::numeric_limits<double>::max();
-    int max_radius = std::max(gridCols, gridRows);
+    double min_dist = std::numeric_limits<double>::max(); //Make min = max so it will be replaced
+    int max_radius = std::max(gridCols, gridRows);//
     
+    //Used for intersections with tied distances 
     std::vector<IntersectionIdx> candidates;
-    const double EPSILON = 0.0001;
+    const double EPSILON = 0.0001;//EPSILON is for the precision 
     
+    //Loop through the entire grid 
     for (int radius = 0; radius < max_radius; radius++) {
         
+        //Starting with the initial calculated position, find the closest intersection 
+        //Each iteration, expand out in a box order 
         int min_c = std::max(0, start_col - radius);
         int max_c = std::min(gridCols - 1, start_col + radius);
         int min_r = std::max(0, start_row - radius);
         int max_r = std::min(gridRows - 1, start_row + radius);
         
+        //Goes through squares 
         for (int c = min_c; c <= max_c; c++) {
             for (int r = min_r; r <= max_r; r++) {
+                //Skips all the indexes that have already been checked, only checks the edge
                 if (radius > 0 && c > min_c && c < max_c && r > min_r && r < max_r) {
                     continue;
                 }
                 
+                //Once at a valid edge of the grid, go through the vector that holds all IDs at that location 
                 for (IntersectionIdx id : intersectionsGrid[c][r].intersections) {
                     double dist = findDistanceBetweenTwoPoints(std::make_pair(my_position, getIntersectionPosition(id)));
                     
+                    //If there is a clearly closer intersection 
                     if (dist < min_dist - EPSILON) {
                         min_dist = dist;
                         nearest_id = id;
                         candidates.clear();
                         candidates.push_back(id);
                     }
+                    //If there is a tie in the distance 
                     else if (std::abs(dist - min_dist) <= EPSILON) {
                         if (nearest_id == -1) {
                             nearest_id = id;
@@ -551,29 +563,24 @@ IntersectionIdx findClosestIntersection(LatLon my_position) {
             }
         }
         
-        // Early exit strategy: only stop when we're absolutely sure
+        //To check if the current nearest_id is definitely the nearest one 
         if (nearest_id != -1) {
-            // Calculate how far the next ring of cells could possibly extend
-            // We need to be conservative here to ensure correctness
+            //Calculate how far the next ring of cells could possibly exten
             
-            // Distance from query point to the edge of the next ring (in grid cells)
+            //The next query point 
             double next_ring_distance_cells = radius + 1;
             
-            // Convert to actual distance (meters)
-            // Account for latitude/longitude scaling
-            double lat_meters_per_cell = latGridSize * kEarthRadiusInMeters * kDegreeToRadian;
-            double lon_meters_per_cell = lonGridSize * kEarthRadiusInMeters * kDegreeToRadian * 
-                                         std::cos(my_position.latitude() * kDegreeToRadian);
+            //Convert the distance in terms of meters 
+            //Account for latitude/longitude scaling
+            double latPerCell = latGridSize * kEarthRadiusInMeters * kDegreeToRadian;
+            double lonPerCell = lonGridSize * kEarthRadiusInMeters * kDegreeToRadian * std::cos(my_position.latitude() * kDegreeToRadian);
             
-            // Maximum cell diagonal (worst case distance within a cell)
-            double max_cell_diagonal = std::sqrt(lat_meters_per_cell * lat_meters_per_cell + 
-                                                 lon_meters_per_cell * lon_meters_per_cell);
+            //Length of a diagonal (the longest distance)
+            double diagonalLength = std::sqrt(latPerCell * latPerCell + lonPerCell * lonPerCell);
             
             // Minimum distance to any point in the next ring
-            // Subtract cell diagonal because a point at the edge of the next ring's cells
-            // could be closer than the ring distance suggests
-            double min_possible_dist_next_ring = (next_ring_distance_cells * std::min(lat_meters_per_cell, lon_meters_per_cell)) 
-                                                 - max_cell_diagonal;
+            // Subtract cell diagonal because a point at the edge of the next ring's cells could be closer than the ring distance suggests
+            double min_possible_dist_next_ring = (next_ring_distance_cells * std::min(latPerCell, lonPerCell)) - diagonalLength;
             
             // Only exit if our best is definitely closer
             if (min_dist < min_possible_dist_next_ring) {
@@ -586,9 +593,9 @@ IntersectionIdx findClosestIntersection(LatLon my_position) {
             break;
         }
     }
-    
+    //Returns the smallest 
     if (!candidates.empty()) {
-        nearest_id = *std::min_element(candidates.begin(), candidates.end());
+        nearest_id = candidates[0]; 
     }
     
     return nearest_id;
