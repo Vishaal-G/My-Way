@@ -465,7 +465,6 @@ double findStreetSegmentTurnAngle(StreetSegmentIdx dst_street_segment_id, Street
     return atan2(cross, dot);
 }
 
-
 std::vector<IntersectionIdx> findAdjacentIntersections(IntersectionIdx intersection_id){
 
     std::vector<IntersectionIdx> adjacent;
@@ -473,19 +472,25 @@ std::vector<IntersectionIdx> findAdjacentIntersections(IntersectionIdx intersect
     // Number of street segments at intersection
     int num_segments = getNumIntersectionStreetSegment(intersection_id);
 
+    // Loop through street segments of this intersection
     for (int i = 0; i < num_segments; i++) {
 
+        // Extract info of the street id
         StreetSegmentIdx seg_id = getIntersectionStreetSegment(intersection_id, i);
         StreetSegmentInfo info = getStreetSegmentInfo(seg_id);
 
-        // One-way
+        // One-way street
         if (info.oneWay) {
+            
+            // Only add the ID of the destination intersection
             if (info.from == intersection_id) {
                 adjacent.push_back(info.to);
             }
         }
-        // Two-way
+        // Two-way street
         else {
+
+            // You can travel to both intersections
             if (info.from == intersection_id) {
                 adjacent.push_back(info.to);
             } else {
@@ -494,7 +499,7 @@ std::vector<IntersectionIdx> findAdjacentIntersections(IntersectionIdx intersect
         }
     }
 
-    // Removing duplciates
+    // Removing duplicates
     std::sort(adjacent.begin(), adjacent.end());
     adjacent.erase(std::unique(adjacent.begin(), adjacent.end()), adjacent.end());
 
@@ -777,12 +782,14 @@ double findFeatureArea(FeatureIdx feature_id) {
     }
     double avg_lat = lat_sum / points.size();
 
-    // Shoelace formula 
+    // Compute area - sum the cross products of consecutive edges from projection
     double signed_area = 0.0;
 
     for (int i = 0; i < (int)points.size() - 1; i++) {
         LatLon p1 = points[i];
         LatLon p2 = points[i + 1];
+
+        // Computing projection and converting to metres
         double x1 = kEarthRadiusInMeters *
                     (p1.longitude() * kDegreeToRadian) * cos(avg_lat);
         double y1 = kEarthRadiusInMeters *
@@ -793,6 +800,7 @@ double findFeatureArea(FeatureIdx feature_id) {
         double y2 = kEarthRadiusInMeters *
                     (p2.latitude() * kDegreeToRadian);
 
+        // Keep summing signed area for each edge (cross products)
         signed_area += (x1 * y2 - x2 * y1);
     }
 
