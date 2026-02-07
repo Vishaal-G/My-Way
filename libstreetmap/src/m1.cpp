@@ -73,6 +73,8 @@ std::vector<std::vector<StreetSegmentIdx>> intersection_to_segments; //Mimicks H
 std::vector<double> streetseg_travel_time;
 
 //HELPER FUNCTION, removes spaces and makes string all lowercase 
+std::string cleanName(std::string name);
+
 std::string cleanName(std::string name){
     std::string cleaned; 
     for(char c : name){
@@ -593,7 +595,7 @@ IntersectionIdx findClosestIntersection(LatLon my_position) {
             break;
         }
     }
-    //Returns the smallest 
+    //Returns the first index in candidates 
     if (!candidates.empty()) {
         nearest_id = candidates[0]; 
     }
