@@ -1,39 +1,14 @@
-/* 
- * Copyright 2026 University of Toronto
- *
- * Permission is hereby granted, to use this software and associated 
- * documentation files (the "Software") in course work at the University 
- * of Toronto, or for personal use. Other uses are prohibited, in 
- * particular the distribution of the Software either publicly or to third 
- * parties.
- *
- * The above copyright notice and this permission notice shall be included in 
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR 
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, 
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE 
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER 
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- */
-#include <iostream>
-#include "m1.h"
-#include "StreetsDatabaseAPI.h"
-#include "OSMDatabaseAPI.h"
-#include <cmath>
-#include <map> 
-#include <vector> 
-#include <string> 
-#include <algorithm> 
-#include <utility>
-#include <cctype> 
-#include <limits> 
-#include <unordered_map> 
-#include <iterator>
-#include <tuple> 
+#include "m1.hpp"
 
+std::string cleanName(std::string name){
+    std::string cleaned; 
+    for(char c : name){
+        if(c != ' '){
+            cleaned += std::tolower(c);
+        }
+    }
+    return cleaned; 
+}
 
 // loadMap will be called with the name of the file that stores the "layer-2"
 // map data accessed through StreetsDatabaseAPI: the street and intersection 
@@ -51,7 +26,6 @@
 //For findClosestIntersection, make a 2D array that consists of vectors of IntersectionIds
 //To create this array, for every intersection, find the LatLon, and then normalize it to calculate the index of this intersection in the array 
 //For findClosestIntersection, simply calculate the index of the LatLon parameter, and then you can find the closest intersection through the predetermined grid 
-
 //Grid has a vector of IntersectionIdx called intersections 
 struct Grid{
     std::vector<IntersectionIdx> intersections; 
@@ -68,22 +42,9 @@ bool osm_loaded = false;
 // Global variable declarations
 std::vector<std::pair<std::string, StreetIdx>> streetNametoId; //Used for findStreetIdsFromPartialStreetName
                                                                //Global to store street name and the street index 
-static std::vector<std::vector<IntersectionIdx>> street_to_intersections;
+std::vector<std::vector<IntersectionIdx>> street_to_intersections;
 std::vector<std::vector<StreetSegmentIdx>> intersection_to_segments; //Mimicks Hashmap used to map all ID's of street segments connected to an intersection
 std::vector<double> streetseg_travel_time;
-
-//HELPER FUNCTION, removes spaces and makes string all lowercase 
-std::string cleanName(std::string name);
-
-std::string cleanName(std::string name){
-    std::string cleaned; 
-    for(char c : name){
-        if(c != ' '){
-            cleaned += std::tolower(c);
-        }
-    }
-    return cleaned; 
-}
 
 //Used for findClosestPOI
 std::vector<LatLon> POIPositions; //Stores LatLon of all the POIs
@@ -97,7 +58,8 @@ std::unordered_map<OSMID, LatLon> LatLonFromOSMID;
 std::unordered_map<OSMID, const OSMNode*> OSMNodeFromID;
 
 //Used for computing street length
-static std::vector<double> g_street_lengths;
+std::vector<double> g_street_lengths;
+
 
 bool loadMap(std::string map_streets_database_filename) {
     bool load_successful = loadStreetsDatabaseBIN(map_streets_database_filename);
