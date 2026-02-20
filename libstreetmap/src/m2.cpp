@@ -20,15 +20,29 @@
  */
 
 #include "m2.h"
-
 #include "ezgl/application.hpp"
 #include "ezgl/graphics.hpp"
 
+void draw_main_canvas (ezgl::renderer *g);
+
+void draw_main_canvas (ezgl::renderer *g){
+   g->set_color(ezgl::BLACK);
+   g->draw_rectangle({0, 0},{1000, 1000});
+}
+
 void drawMap() {
-   // Set up the ezgl graphics window and hand control to it, as shown in the 
-   // ezgl example program. 
-   // This function will be called by both the unit tests (ece297exercise) 
-   // and your main() function in main/src/main.cpp.
-   // The unit tests always call loadMap() before calling this function
-   // and call closeMap() after this function returns.
+    // 1. Setup EZGL settings (Make sure the UI path matches your repo structure!)
+    ezgl::application::settings settings;
+    settings.main_ui_resource = "libstreetmap/resources/main.ui"; 
+    settings.window_identifier = "MainWindow";
+    settings.canvas_identifier = "MainCanvas";
+    
+    // 2. Create the application object
+    ezgl::application application(settings);
+    
+   ezgl::rectangle initial_world({0, 0}, {1000,1000});
+   application.add_canvas("MainCanvas", draw_main_canvas, initial_world);
+
+   application.run(nullptr, nullptr, nullptr, nullptr);
+
 }
