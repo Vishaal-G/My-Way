@@ -20,29 +20,100 @@
  */
 
 #include "m2.h"
+#include "m1.hpp" 
+//These are the graphics libraries
 #include "ezgl/application.hpp"
 #include "ezgl/graphics.hpp"
+#include <cmath>
+#include <algorithm>
 
+double cos_lat_avg;
 void draw_main_canvas (ezgl::renderer *g);
 
-void draw_main_canvas (ezgl::renderer *g){
-   g->set_color(ezgl::BLACK);
-   g->draw_rectangle({0, 0},{1000, 1000});
+
+struct Intersection{
+   LatLon position;
+   std::string name; 
+};
+//Store all the intersections 
+std::vector<Intersection> intersections; 
+
+float xFromLon(float lon);
+float yFromLat(float lat);
+
+float lonFromX(float x);
+float latFromY(float y);
+
+float xFromLon(float lon){
+   return (lon * kDegreeToRadian * kEarthRadiusInMeters * cos_lat_avg);
+}
+float yFromLat(float lat){
+   return lat * kDegreeToRadian * kEarthRadiusInMeters;
 }
 
+float lonFromX(float x){
+   return x / (kEarthRadiusInMeters * kDegreeToRadian * cos_lat_avg);
+}
+float latFromY(float y){
+   return y / (kEarthRadiusInMeters * kDegreeToRadian);
+}
+
+void draw_main_canvas (ezgl::renderer *g){
+   std::cout << "Drawing canvas with " << intersections.size() << " intersections!" << std::endl;
+   g->draw_rectangle({0, 0},{1000, 1000}); //Draws map of 1000x1000
+   g->set_color(0, 0, 0);  
+
+   for(size_t i = 0; i < intersections.size(); ++i){
+
+      //make sure to scale these using xfromLon & yFromLat
+      float x = (intersections[i].position.longitude()); 
+      float y = (intersections[i].position.latitude()); 
+
+      float width = 0.001; 
+      float height = width; 
+
+      //Starting at {x,y} and draw until {x+width, y+height}
+      g->fill_rectangle({x, y}, {x+width, y+height});
+   }
+} 
+
 void drawMap() {
-    // 1. Setup EZGL settings (Make sure the UI path matches your repo structure!)
-    ezgl::application::settings settings;
-    settings.main_ui_resource = "libstreetmap/resources/main.ui"; 
-    settings.window_identifier = "MainWindow";
-    settings.canvas_identifier = "MainCanvas";
+   
+   //Stores the max and min coordinate system that you need to paint 
+   double maxLat = getIntersectionPosition(0).latitude(); 
+   double minLat = maxLat; 
+   double maxLon = getIntersectionPosition(0).longitude(); 
+   double minLon = maxLon; 
+
+   //To draw intersections 
+   intersections.resize(getNumIntersections()); 
+   for(int i = 0; i < getNumIntersections(); ++i){
+      intersections[i].position = getIntersectionPosition(i);
+      intersections[i].name = getIntersectionName(i); 
+
+      maxLat = std::max(maxLat, intersections[i].position.latitude()); 
+      minLat = std::min(minLat, intersections[i].position.latitude()); 
+      maxLon = std::max(maxLon, intersections[i].position.longitude()); 
+      minLon = std::min(minLon, intersections[i].position.longitude()); 
+   }
+   //THIS DOES NOT WORK, supposed to calculate the average cos lat ?? to scale the map correctly  
+   double lat_avg = (maxLat + minLat) / 2.0;
+   cos_lat_avg = cos(lat_avg * kDegreeToRadian);
+
+   ezgl::application::settings settings;
+   settings.main_ui_resource = "libstreetmap/resources/main.ui"; 
+   settings.window_identifier = "MainWindow";
+   settings.canvas_identifier = "MainCanvas";
     
-    // 2. Create the application object
-    ezgl::application application(settings);
-    
-   ezgl::rectangle initial_world({0, 0}, {1000,1000});
+   //Create the ezgl application 
+   ezgl::application application(settings);
+
+
+   //Creates canvas of 1000x1000 
+   ezgl::rectangle initial_world({(minLon), (minLat)}, {(maxLon), (maxLat)});
    application.add_canvas("MainCanvas", draw_main_canvas, initial_world);
 
+   //Run the ezgl application 
    application.run(nullptr, nullptr, nullptr, nullptr);
 
 }
