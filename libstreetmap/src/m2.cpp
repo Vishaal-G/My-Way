@@ -21,6 +21,7 @@
 
 #include "m2.h"
 #include "m1.hpp" 
+#include <gtk/gtk.h>
 //These are the graphics libraries
 #include "ezgl/application.hpp"
 #include "ezgl/graphics.hpp"
@@ -90,6 +91,17 @@ void draw_main_canvas (ezgl::renderer *g){
       g->fill_rectangle({x, y}, {x+width, y+height});
    }
 
+// Drawing highed intersections from the find feature
+g->set_color(ezgl::YELLOW);
+
+for(int id : highlighted_intersections) {
+    ezgl::point2d center = {
+        intersections[id].x,
+        intersections[id].y
+    };
+    g->fill_arc(center, 50, 0, 360);
+}
+
    // For clicking the intersection
    if(selected_intersection != -1) {
   g->set_color(ezgl::RED);
@@ -102,6 +114,66 @@ g->set_color(ezgl::RED);
 g->fill_arc(center, 60, 0, 360);
 }
 } 
+
+static void find_and_highlight(const std::string& street1,
+                                  const std::string& street2) {
+
+   // Clear highlights from previous use
+    highlighted_intersections.clear();
+
+   // Get all street IDs matching (or partial) with the street inputs
+    auto s1 = findStreetIdsFromPartialStreetName(street1);
+    auto s2 = findStreetIdsFromPartialStreetName(street2);
+
+   // Exit if no matches
+    if(s1.empty() || s2.empty()) {
+        std::cout << "Street not found.\n";
+        return;
+    }
+
+   // Checking combinations of matching input IDs
+    for(int id1 : s1) {
+        for(int id2 : s2) {
+
+           // Find intersections shared by the two streets
+            auto ints = findIntersectionsOfTwoStreets(id1, id2);
+
+            // If intersections exists, store and exit 
+            if(!ints.empty()) {
+                highlighted_intersections = std::move(ints);
+                std::cout << "Found "
+                          << highlighted_intersections.size()
+                          << " intersections.\n";
+                return;
+            }
+        }
+    }
+   // Else no intersections found for this pair
+    std::cout << "Found 0 intersections.\n";
+}
+
+static void find_button(GtkWidget*, gpointer data) {
+    auto* app = static_cast<ezgl::application*>(data);
+
+   // Access street name entry fields  from UI
+    GtkEntry* e1 = GTK_ENTRY(app->get_object("Street1Entry"));
+    GtkEntry* e2 = GTK_ENTRY(app->get_object("Street2Entry"));
+
+   // Get text entered by the user
+    std::string s1 = gtk_entry_get_text(e1);
+    std::string s2 = gtk_entry_get_text(e2);
+
+   // Find + highlight intersections of the streets user entered (if any)
+    find_and_highlight(s1, s2);
+
+    // Refreshing canvas
+    app->refresh_drawing();
+}
+
+void initial_setup(ezgl::application* app, bool) {
+    GtkWidget* find_btn = GTK_WIDGET(app->get_object("FindButton"));
+    g_signal_connect(find_btn, "clicked", G_CALLBACK(find_button), app);
+}
 
 void drawMap() {
    
@@ -132,7 +204,6 @@ void drawMap() {
 
    }
 
-
    ezgl::application::settings settings;
    settings.main_ui_resource = "libstreetmap/resources/main.ui"; 
    settings.window_identifier = "MainWindow";
@@ -147,5 +218,5 @@ void drawMap() {
    application.add_canvas("MainCanvas", draw_main_canvas, initial_world);
 
    //Run the ezgl application 
-   application.run(nullptr, act_on_mouse_click, nullptr, nullptr);
+   application.run(initial_setup, act_on_mouse_click, nullptr, nullptr);
 }
