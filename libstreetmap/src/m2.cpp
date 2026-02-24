@@ -34,6 +34,8 @@ void draw_main_canvas (ezgl::renderer *g);
 struct Intersection{
    LatLon position;
    std::string name; 
+   float x; 
+   float y; 
 };
 //Store all the intersections 
 std::vector<Intersection> intersections; 
@@ -43,6 +45,8 @@ float yFromLat(float lat);
 
 float lonFromX(float x);
 float latFromY(float y);
+
+void act_on_mouse_click(ezgl::application* app, GdkEventButton* event, double x, double y);
 
 float xFromLon(float lon){
    return kEarthRadiusInMeters * (lon * kDegreeToRadian) * cos_lat_avg;
@@ -58,6 +62,22 @@ float latFromY(float y){
    return y / (kEarthRadiusInMeters * kDegreeToRadian);
 }
 
+void act_on_mouse_click(ezgl::application* app, GdkEventButton* event, double x, double y){
+   std::cout << "Mouse clicked at"  << x << " " << y; 
+
+   LatLon pos = LatLon(latFromY(y), lonFromX(x)); 
+   int id = findClosestIntersection(pos); 
+
+   float width = 50; 
+   float height = width; 
+
+   ezgl::renderer *g = app->get_renderer();
+   g->set_color(ezgl::RED); 
+   g->fill_rectangle({intersections[id].x, intersections[id].y}, width, height); 
+
+   std::cout << "Closest position " << intersections[id].name; 
+}
+
 void draw_main_canvas (ezgl::renderer *g){
    std::cout << "Drawing canvas with " << intersections.size() << " intersections!" << std::endl;
    g->fill_rectangle(g->get_visible_world());
@@ -66,8 +86,8 @@ void draw_main_canvas (ezgl::renderer *g){
    for(size_t i = 0; i < intersections.size(); ++i){
 
       //make sure to scale these using xfromLon & yFromLat
-      float x = xFromLon(intersections[i].position.longitude()); 
-      float y = yFromLat(intersections[i].position.latitude()); 
+      float x = intersections[i].x; 
+      float y = intersections[i].y; 
 
       float width = 50; 
       float height = width; 
@@ -100,6 +120,13 @@ void drawMap() {
    double avgLat = ((maxLat + minLat) / 2.0) * kDegreeToRadian;
    cos_lat_avg = cos(avgLat);
 
+   for(int i = 0; i < getNumIntersections(); ++i){
+      intersections[i].x = xFromLon(intersections[i].position.longitude());
+      intersections[i].y = yFromLat(intersections[i].position.latitude());
+
+   }
+
+
    ezgl::application::settings settings;
    settings.main_ui_resource = "libstreetmap/resources/main.ui"; 
    settings.window_identifier = "MainWindow";
@@ -114,6 +141,5 @@ void drawMap() {
    application.add_canvas("MainCanvas", draw_main_canvas, initial_world);
 
    //Run the ezgl application 
-   application.run(nullptr, nullptr, nullptr, nullptr);
-
+   application.run(initial_setup, act_on_mouse_click, act_on_mouse_move, act_on_key_press); 
 }
