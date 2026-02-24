@@ -37,8 +37,12 @@ struct Intersection{
    float x; 
    float y; 
 };
+
 //Store all the intersections 
 std::vector<Intersection> intersections; 
+
+// Global variable
+static int selected_intersection = -1;
 
 float xFromLon(float lon);
 float yFromLat(float lat);
@@ -62,20 +66,11 @@ float latFromY(float y){
    return y / (kEarthRadiusInMeters * kDegreeToRadian);
 }
 
-void act_on_mouse_click(ezgl::application* app, GdkEventButton* event, double x, double y){
-   std::cout << "Mouse clicked at"  << x << " " << y; 
-
-   LatLon pos = LatLon(latFromY(y), lonFromX(x)); 
-   int id = findClosestIntersection(pos); 
-
-   float width = 50; 
-   float height = width; 
-
-   ezgl::renderer *g = app->get_renderer();
-   g->set_color(ezgl::RED); 
-   g->fill_rectangle({intersections[id].x, intersections[id].y}, width, height); 
-
-   std::cout << "Closest position " << intersections[id].name; 
+void act_on_mouse_click(ezgl::application* app, GdkEventButton*, double x, double y) {
+  LatLon clicked_pos(latFromY(y), lonFromX(x));
+  selected_intersection = findClosestIntersection(clicked_pos);
+  std::cout << "Clicked: " << intersections[selected_intersection].name << "\n";
+  app->refresh_drawing();
 }
 
 void draw_main_canvas (ezgl::renderer *g){
@@ -95,6 +90,18 @@ void draw_main_canvas (ezgl::renderer *g){
       //Starting at {x,y} and draw until {x+width, y+height}
       g->fill_rectangle({x, y}, {x+width, y+height});
    }
+
+   // For clicking the intersection
+   if(selected_intersection != -1) {
+  g->set_color(ezgl::RED);
+ezgl::point2d center = {
+    intersections[selected_intersection].x,
+    intersections[selected_intersection].y
+};
+
+g->set_color(ezgl::RED);
+g->fill_arc(center, 60, 0, 360);
+}
 } 
 
 void drawMap() {
