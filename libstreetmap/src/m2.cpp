@@ -39,6 +39,16 @@ struct Intersection{
    float y; 
 };
 
+struct MyPOI {
+    LatLon position;
+    std::string name;
+    float x;
+    float y;
+};
+
+// Global vector to hold POI data
+std::vector<MyPOI> Mypois; 
+
 // Global variables
 static int selected_intersection = -1;
 std::vector<Intersection> intersections; //Store all the intersections 
@@ -74,6 +84,7 @@ void act_on_mouse_click(ezgl::application* app, GdkEventButton*, double x, doubl
 }
 
 void draw_main_canvas (ezgl::renderer *g){
+   ezgl::rectangle visible_world = g->get_visible_world();
    std::cout << "Drawing canvas with " << intersections.size() << " intersections!" << std::endl;
    g->fill_rectangle(g->get_visible_world());
    g->set_color(0, 0, 0);  
@@ -113,6 +124,26 @@ ezgl::point2d center = {
 g->set_color(ezgl::RED);
 g->fill_arc(center, 60, 0, 360);
 }
+if (visible_world.width() < 5000) { 
+        g->set_color(ezgl::BLUE);
+        
+        for (const auto& poi : Mypois) {
+            // Visibility check: skip if off-screen
+            if (visible_world.contains(poi.x, poi.y)) {
+                // Draw a small circle/arc for the POI
+                g->fill_arc({poi.x, poi.y}, 20, 0, 360);
+                
+                // Draw text if zoomed in even further
+                if (visible_world.width() < 1000) {
+                    g->set_color(ezgl::BLACK);
+                    g->draw_text({poi.x, poi.y + 25}, poi.name);
+                    g->set_color(ezgl::BLUE); 
+                }
+            }
+        }
+    }
+
+
 } 
 
 static void find_and_highlight(const std::string& street1,
@@ -184,6 +215,7 @@ void drawMap() {
    double minLon = maxLon; 
 
    //To draw intersections 
+   intersections.clear();
    intersections.resize(getNumIntersections()); 
    for(int i = 0; i < getNumIntersections(); ++i){
       intersections[i].position = getIntersectionPosition(i);
@@ -203,6 +235,19 @@ void drawMap() {
       intersections[i].y = yFromLat(intersections[i].position.latitude());
 
    }
+
+   //Loading POI
+   Mypois.clear();
+    int numPOIs = getNumPointsOfInterest();
+    Mypois.resize(numPOIs);
+    
+    for (int i = 0; i < numPOIs; i++) {
+        Mypois[i].position = getPOIPosition(i);
+        Mypois[i].name = getPOIName(i);
+        // Project coordinates using the already-calculated cos_lat_avg
+        Mypois[i].x = xFromLon(Mypois[i].position.longitude());
+        Mypois[i].y = yFromLat(Mypois[i].position.latitude());
+    }
 
    ezgl::application::settings settings;
    settings.main_ui_resource = "libstreetmap/resources/main.ui"; 

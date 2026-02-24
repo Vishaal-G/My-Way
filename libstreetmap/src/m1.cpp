@@ -72,7 +72,7 @@ bool loadMap(std::string map_streets_database_filename) {
   
     //For findStreetIdsFromPartialStreetName, need to first create structure to make look up time faster
     streetNametoId.clear(); //Clean up the map on each run 
-    streetNametoId.reserve(getNumStreets());
+    //streetNametoId.reserve(getNumStreets());
     for(int i = 0; i < getNumStreets(); i++){
         std::string inputName = getStreetName(i); //Gets all street names 
         std::string streetName = cleanName(inputName); //Gets rid of spaces and all lowercase
@@ -128,7 +128,7 @@ bool loadMap(std::string map_streets_database_filename) {
     int numberOfPOIs = getNumPointsOfInterest(); 
     POIPositions.resize(numberOfPOIs);
     POIbyName.clear(); //Clear the hashmap 
-    POIbyName.reserve(numberOfPOIs); 
+    //POIbyName.reserve(numberOfPOIs); 
 
     for(int i = 0; i < numberOfPOIs; ++i){
         //Stores all the LatLon of POIs
@@ -197,9 +197,9 @@ bool loadMap(std::string map_streets_database_filename) {
         // Populate the LatLonFromOSMID and OSMNodeFromID hashmap 
         int numNodes = getNumberOfNodes(); 
         LatLonFromOSMID.clear(); 
-        LatLonFromOSMID.reserve(numNodes); 
+        //LatLonFromOSMID.reserve(numNodes); 
         OSMNodeFromID.clear(); 
-        OSMNodeFromID.reserve(numNodes); 
+        //OSMNodeFromID.reserve(numNodes); 
 
         for(int i = 0; i < numNodes; ++i){
             const OSMNode* node = getNodeByIndex(i); 
@@ -211,7 +211,7 @@ bool loadMap(std::string map_streets_database_filename) {
         // Populate the OSMWayFromID hashmap 
         int numWays = getNumberOfWays();
         OSMWayFromID.clear();
-        OSMWayFromID.reserve(numWays);
+        //OSMWayFromID.reserve(numWays);
 
         for (int i = 0; i < numWays; ++i) {
             const OSMWay* way = getWayByIndex(i); 
@@ -723,7 +723,7 @@ double findFeatureArea(FeatureIdx feature_id) {
 
     // Load all feature points
     std::vector<LatLon> points;
-    points.reserve(num_points);
+    //points.reserve(num_points);
     for (int i = 0; i < num_points; i++) {
         points.push_back(getFeaturePoint(feature_id, i));
     }
