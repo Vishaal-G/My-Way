@@ -45,10 +45,10 @@ float lonFromX(float x);
 float latFromY(float y);
 
 float xFromLon(float lon){
-   return (lon * kDegreeToRadian * kEarthRadiusInMeters * cos_lat_avg);
+   return kEarthRadiusInMeters * (lon * kDegreeToRadian) * cos_lat_avg;
 }
 float yFromLat(float lat){
-   return lat * kDegreeToRadian * kEarthRadiusInMeters;
+   return kEarthRadiusInMeters * (lat * kDegreeToRadian);
 }
 
 float lonFromX(float x){
@@ -60,16 +60,16 @@ float latFromY(float y){
 
 void draw_main_canvas (ezgl::renderer *g){
    std::cout << "Drawing canvas with " << intersections.size() << " intersections!" << std::endl;
-   g->draw_rectangle({0, 0},{1000, 1000}); //Draws map of 1000x1000
+   g->fill_rectangle(g->get_visible_world());
    g->set_color(0, 0, 0);  
 
    for(size_t i = 0; i < intersections.size(); ++i){
 
       //make sure to scale these using xfromLon & yFromLat
-      float x = (intersections[i].position.longitude()); 
-      float y = (intersections[i].position.latitude()); 
+      float x = xFromLon(intersections[i].position.longitude()); 
+      float y = yFromLat(intersections[i].position.latitude()); 
 
-      float width = 0.001; 
+      float width = 50; 
       float height = width; 
 
       //Starting at {x,y} and draw until {x+width, y+height}
@@ -97,8 +97,8 @@ void drawMap() {
       minLon = std::min(minLon, intersections[i].position.longitude()); 
    }
    //THIS DOES NOT WORK, supposed to calculate the average cos lat ?? to scale the map correctly  
-   double lat_avg = (maxLat + minLat) / 2.0;
-   cos_lat_avg = cos(lat_avg * kDegreeToRadian);
+   double avgLat = ((maxLat + minLat) / 2.0) * kDegreeToRadian;
+   cos_lat_avg = cos(avgLat);
 
    ezgl::application::settings settings;
    settings.main_ui_resource = "libstreetmap/resources/main.ui"; 
@@ -110,7 +110,7 @@ void drawMap() {
 
 
    //Creates canvas of 1000x1000 
-   ezgl::rectangle initial_world({(minLon), (minLat)}, {(maxLon), (maxLat)});
+   ezgl::rectangle initial_world({xFromLon(minLon), yFromLat(minLat)}, {xFromLon(maxLon), yFromLat(maxLat)});
    application.add_canvas("MainCanvas", draw_main_canvas, initial_world);
 
    //Run the ezgl application 
