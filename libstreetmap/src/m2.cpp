@@ -38,11 +38,10 @@ struct Intersection{
    float y; 
 };
 
-//Store all the intersections 
-std::vector<Intersection> intersections; 
-
-// Global variable
+// Global variables
 static int selected_intersection = -1;
+std::vector<Intersection> intersections; //Store all the intersections 
+static std::vector<int> highlighted_intersections;
 
 float xFromLon(float lon);
 float yFromLat(float lat);
@@ -148,5 +147,5 @@ void drawMap() {
    application.add_canvas("MainCanvas", draw_main_canvas, initial_world);
 
    //Run the ezgl application 
-   application.run(initial_setup, act_on_mouse_click, act_on_mouse_move, act_on_key_press); 
+   application.run(nullptr, act_on_mouse_click, nullptr, nullptr);
 }
