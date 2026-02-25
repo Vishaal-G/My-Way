@@ -144,14 +144,14 @@ void draw_main_canvas (ezgl::renderer *g){
         }
     }
    
-   //Draws all intersections 
+   //Draws all intersections (mainly used to store intersections)
    g->set_color(0, 0, 0);  
    for(size_t i = 0; i < intersections.size(); ++i){
 
       float x = intersections[i].x; 
       float y = intersections[i].y; 
 
-      float width = 50; 
+      float width = 0; 
       float height = width; 
    
       //Used for most accurate selection 
@@ -185,7 +185,7 @@ void draw_main_canvas (ezgl::renderer *g){
    };
 
    g->set_color(ezgl::RED);
-   g->fill_arc(center, 60, 0, 360);
+   g->fill_arc(center, 3, 0, 360);
    }
 
    //Draws blue circles for the POIs
