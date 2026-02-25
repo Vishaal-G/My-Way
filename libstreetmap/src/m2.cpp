@@ -81,15 +81,12 @@ float latFromY(float y){
 void act_on_mouse_click(ezgl::application* app, GdkEventButton*, double x, double y) {
   LatLon clicked_pos(latFromY(y), lonFromX(x));
   selected_intersection = findClosestIntersection(clicked_pos);
-  if (selected_intersection != -1) {
-        // 1. Print to the terminal
-        std::cout << "Clicked: " << intersections[selected_intersection].name << "\n"; 
-        
-        // 2. Print to the EZGL UI bottom status bar
-        std::stringstream ss; 
-        ss << "Intersection Clicked: " << intersections[selected_intersection].name;
-        app->update_message(ss.str());
-    }
+  //Displays clicked intersection at the bottom of the map 
+  if(selected_intersection != -1){       
+      std::stringstream ss; 
+      ss << "Intersection Clicked: " << intersections[selected_intersection].name;
+      app->update_message(ss.str());
+   }
   app->refresh_drawing();
 }
 
@@ -108,9 +105,11 @@ void draw_main_canvas (ezgl::renderer *g){
 
       float width = 50; 
       float height = width; 
+   
+      ezgl::point2d inter_loc = {x - width / 2.0f, y - height / 2.0f};
 
       //Starting at {x,y} and draw until {x+width, y+height}
-      g->fill_rectangle({x, y}, {x+width, y+height});
+      g->fill_rectangle(inter_loc, width, height);
    }
    auto currTime = std::chrono::high_resolution_clock::now(); 
    auto wallClock = std::chrono::duration_cast<std::chrono::duration<double>> (currTime - startTime);
