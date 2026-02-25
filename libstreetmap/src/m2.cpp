@@ -48,6 +48,14 @@ struct MyPOI {
     float y;
 };
 
+struct streetSegments {
+    // Stores the start, end, and any intermediate curve points in order
+    std::vector<ezgl::point2d> points; 
+};
+
+// Global vector to hold all street segments
+std::vector<streetSegments> streets;
+
 // Global vector to hold POI data
 std::vector<MyPOI> Mypois; 
 
@@ -95,68 +103,80 @@ void draw_main_canvas (ezgl::renderer *g){
    ezgl::rectangle visible_world = g->get_visible_world();
    std::cout << "Drawing canvas with " << intersections.size() << " intersections!" << std::endl;
    g->fill_rectangle(g->get_visible_world());
-   g->set_color(0, 0, 0);  
 
+   //Draws all street segments
+   g->set_color(ezgl::BLUE); 
+   g->set_line_width(2);      
+
+   for (const auto& seg : streets) {
+      for (size_t i = 0; i < seg.points.size() - 1; i++) {
+         g->draw_line(seg.points[i], seg.points[i+1]);
+      }
+   }
+   
+   //Draws all intersections 
+   g->set_color(0, 0, 0);  
    for(size_t i = 0; i < intersections.size(); ++i){
 
-      //make sure to scale these using xfromLon & yFromLat
       float x = intersections[i].x; 
       float y = intersections[i].y; 
 
       float width = 50; 
       float height = width; 
    
+      //Used for most accurate selection 
       ezgl::point2d inter_loc = {x - width / 2.0f, y - height / 2.0f};
 
       //Starting at {x,y} and draw until {x+width, y+height}
       g->fill_rectangle(inter_loc, width, height);
    }
+   //Testing how long it takes the draw the map 
    auto currTime = std::chrono::high_resolution_clock::now(); 
    auto wallClock = std::chrono::duration_cast<std::chrono::duration<double>> (currTime - startTime);
    std::cout << "Canvas took " << wallClock.count() << " seconds \n";
 
-// Drawing highed intersections from the find feature
-g->set_color(ezgl::YELLOW);
+   // Drawing highlighted intersections from the find feature
+   g->set_color(ezgl::YELLOW);
 
-for(int id : highlighted_intersections) {
-    ezgl::point2d center = {
-        intersections[id].x,
-        intersections[id].y
-    };
-    g->fill_arc(center, 50, 0, 360);
-}
+   for(int id : highlighted_intersections) {
+      ezgl::point2d center = {
+         intersections[id].x,
+         intersections[id].y
+      };
+      g->fill_arc(center, 50, 0, 360);
+   }
 
-   // For clicking the intersection
+   //Clicking the intersection 
    if(selected_intersection != -1) {
-  g->set_color(ezgl::RED);
-ezgl::point2d center = {
-    intersections[selected_intersection].x,
-    intersections[selected_intersection].y
-};
+      g->set_color(ezgl::RED);
+      ezgl::point2d center = {
+      intersections[selected_intersection].x,
+      intersections[selected_intersection].y
+   };
 
-g->set_color(ezgl::RED);
-g->fill_arc(center, 60, 0, 360);
-}
-if (visible_world.width() < 5000) { 
-        g->set_color(ezgl::BLUE);
-        
-        for (const auto& poi : Mypois) {
-            // Visibility check: skip if off-screen
-            if (visible_world.contains(poi.x, poi.y)) {
-                // Draw a small circle/arc for the POI
-                g->fill_arc({poi.x, poi.y}, 20, 0, 360);
-                
-                // Draw text if zoomed in even further
-                if (visible_world.width() < 1000) {
-                    g->set_color(ezgl::BLACK);
-                    g->draw_text({poi.x, poi.y + 25}, poi.name);
-                    g->set_color(ezgl::BLUE); 
-                }
-            }
-        }
-    }
+   g->set_color(ezgl::RED);
+   g->fill_arc(center, 60, 0, 360);
+   }
 
-
+   //Draws blue circles for the POIs
+   if (visible_world.width() < 5000) { 
+         g->set_color(ezgl::BLUE);
+         
+         for (const auto& poi : Mypois) {
+               // Visibility check: skip if off-screen
+               if (visible_world.contains(poi.x, poi.y)) {
+                  // Draw a small circle/arc for the POI
+                  g->fill_arc({poi.x, poi.y}, 20, 0, 360);
+                  
+                  // Draw text if zoomed in even further
+                  if (visible_world.width() < 1000) {
+                     g->set_color(ezgl::BLACK);
+                     g->draw_text({poi.x, poi.y + 25}, poi.name);
+                     g->set_color(ezgl::BLUE); 
+                  }
+               }
+         }
+      }
 } 
 
 static void find_and_highlight(const std::string& street1,
@@ -220,13 +240,13 @@ void initial_setup(ezgl::application* app, bool) {
 }
 
 void drawMap() {
-   
+
    //Stores the max and min coordinate system that you need to paint 
    double maxLat = getIntersectionPosition(0).latitude(); 
    double minLat = maxLat; 
    double maxLon = getIntersectionPosition(0).longitude(); 
-   double minLon = maxLon; 
-
+   double minLon = maxLon;
+   
    //To draw intersections 
    intersections.clear();
    intersections.resize(getNumIntersections()); 
@@ -248,11 +268,35 @@ void drawMap() {
 
    }
 
+   //To draw street segments 
+   streets.clear(); 
+   int numSegments = getNumStreetSegments();
+   streets.resize(numSegments);
+   for (int i = 0; i < numSegments; i++){
+      //Get the information about the street segment (to, from, curve points, id, one way, speed limit)
+      StreetSegmentInfo info = getStreetSegmentInfo(i);
+         
+      //Get starting intersection 
+      LatLon fromPos = getIntersectionPosition(info.from);
+      streets[i].points.push_back({xFromLon(fromPos.longitude()), yFromLat(fromPos.latitude())});
+
+      //Get all the curve points so that the streets curve smoothly 
+      for (int j = 0; j < info.numCurvePoints; j++) {
+         //LatLon getStreetSegmentCurvePoint(StreetSegmentIdx streetSegmentIdx, int pointNum);
+         LatLon curvePos = getStreetSegmentCurvePoint(i, j);
+         streets[i].points.push_back({xFromLon(curvePos.longitude()), yFromLat(curvePos.latitude())});
+      }
+
+      //Get the end intersection 
+      LatLon toPos = getIntersectionPosition(info.to);
+      streets[i].points.push_back({xFromLon(toPos.longitude()), yFromLat(toPos.latitude())});
+      }
+
    //Loading POI
    Mypois.clear();
     int numPOIs = getNumPointsOfInterest();
     Mypois.resize(numPOIs);
-    
+    //Draw POIs 
     for (int i = 0; i < numPOIs; i++) {
         Mypois[i].position = getPOIPosition(i);
         Mypois[i].name = getPOIName(i);
