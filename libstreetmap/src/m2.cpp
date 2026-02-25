@@ -51,6 +51,7 @@ struct MyPOI {
 struct streetSegments {
     // Stores the start, end, and any intermediate curve points in order
     std::vector<ezgl::point2d> points; 
+    float speedLimit; 
 };
 
 // Global vector to hold all street segments
@@ -104,15 +105,44 @@ void draw_main_canvas (ezgl::renderer *g){
    std::cout << "Drawing canvas with " << intersections.size() << " intersections!" << std::endl;
    g->fill_rectangle(g->get_visible_world());
 
-   //Draws all street segments
-   g->set_color(ezgl::BLUE); 
-   g->set_line_width(2);      
+   // ---------------------------------------------------------
+    // Draw street segments with Level of Detail (LOD)
+    // ---------------------------------------------------------
+    double current_zoom_width = visible_world.width();
 
-   for (const auto& seg : streets) {
-      for (size_t i = 0; i < seg.points.size() - 1; i++) {
-         g->draw_line(seg.points[i], seg.points[i+1]);
-      }
-   }
+    for (const auto& seg : streets) {
+
+       float speed_kmh = seg.speedLimit * 3.6f;
+
+       
+        //Dont graph minor streets when really zoomed out 
+        if (current_zoom_width > 15000 && speed_kmh <= 50) {
+            continue; 
+        }
+        if (current_zoom_width > 5000 && speed_kmh <= 30) {
+            continue;
+        }
+        //To graph highways/faster 
+        if (speed_kmh >= 80) {
+            g->set_color(ezgl::ORANGE);
+            g->set_line_width(3);
+        } 
+        //To graph 
+        else if (speed_kmh >= 60) {
+            g->set_color(ezgl::BLUE);
+            g->set_line_width(2);
+        } 
+        // Minor/residential roads
+        else {
+            g->set_color(250, 250, 250); // Light gray
+            g->set_line_width(1);
+        }
+
+        // Draw the segment
+        for (size_t i = 0; i < seg.points.size() - 1; i++) {
+            g->draw_line(seg.points[i], seg.points[i+1]);
+        }
+    }
    
    //Draws all intersections 
    g->set_color(0, 0, 0);  
@@ -275,7 +305,8 @@ void drawMap() {
    for (int i = 0; i < numSegments; i++){
       //Get the information about the street segment (to, from, curve points, id, one way, speed limit)
       StreetSegmentInfo info = getStreetSegmentInfo(i);
-         
+      streets[i].speedLimit = info.speedLimit;
+
       //Get starting intersection 
       LatLon fromPos = getIntersectionPosition(info.from);
       streets[i].points.push_back({xFromLon(fromPos.longitude()), yFromLat(fromPos.latitude())});
