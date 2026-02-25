@@ -14,12 +14,32 @@
         <property name="visible">True</property>
         <property name="can-focus">False</property>
         <child>
-          <object class="GtkDrawingArea" id="MainCanvas">
+          <object class="GtkOverlay" id="CanvasOverlay">
             <property name="visible">True</property>
-            <property name="can-focus">True</property>
-            <property name="events">GDK_KEY_PRESS_MASK | GDK_STRUCTURE_MASK</property>
+            <property name="can-focus">False</property>
             <property name="hexpand">True</property>
             <property name="vexpand">True</property>
+            <child>
+              <object class="GtkDrawingArea" id="MainCanvas">
+                <property name="visible">True</property>
+                <property name="can-focus">True</property>
+                <property name="events">GDK_KEY_PRESS_MASK | GDK_STRUCTURE_MASK</property>
+                <property name="hexpand">True</property>
+                <property name="vexpand">True</property>
+              </object>
+            </child>
+            <child type="overlay">
+              <object class="GtkSearchEntry" id="TopSearch">
+                <property name="visible">True</property>
+                <property name="can-focus">True</property>
+                <property name="placeholder-text">Search...</property>
+                <property name="width-request">250</property>
+                <property name="margin-start">8</property>
+                <property name="margin-top">8</property>
+                <property name="halign">start</property>
+                <property name="valign">start</property>
+              </object>
+            </child>
           </object>
           <packing>
             <property name="left-attach">0</property>
