@@ -81,6 +81,15 @@ float latFromY(float y){
 void act_on_mouse_click(ezgl::application* app, GdkEventButton*, double x, double y) {
   LatLon clicked_pos(latFromY(y), lonFromX(x));
   selected_intersection = findClosestIntersection(clicked_pos);
+  if (selected_intersection != -1) {
+        // 1. Print to the terminal
+        std::cout << "Clicked: " << intersections[selected_intersection].name << "\n"; 
+        
+        // 2. Print to the EZGL UI bottom status bar
+        std::stringstream ss; 
+        ss << "Intersection Clicked: " << intersections[selected_intersection].name;
+        app->update_message(ss.str());
+    }
   app->refresh_drawing();
 }
 
@@ -94,8 +103,8 @@ void draw_main_canvas (ezgl::renderer *g){
    for(size_t i = 0; i < intersections.size(); ++i){
 
       //make sure to scale these using xfromLon & yFromLat
-      float x = xFromLon(intersections[i].x); 
-      float y = yFromLat(intersections[i].y); 
+      float x = intersections[i].x; 
+      float y = intersections[i].y; 
 
       float width = 50; 
       float height = width; 
@@ -231,7 +240,6 @@ void drawMap() {
       maxLon = std::max(maxLon, intersections[i].position.longitude()); 
       minLon = std::min(minLon, intersections[i].position.longitude()); 
    }
-   //THIS DOES NOT WORK, supposed to calculate the average cos lat ?? to scale the map correctly  
    double avgLat = ((maxLat + minLat) / 2.0) * kDegreeToRadian;
    cos_lat_avg = cos(avgLat);
 
