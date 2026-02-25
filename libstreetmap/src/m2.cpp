@@ -27,6 +27,8 @@
 #include "ezgl/graphics.hpp"
 #include <cmath>
 #include <algorithm>
+#include <chrono>
+#include <sstream>
 
 double cos_lat_avg;
 void draw_main_canvas (ezgl::renderer *g);
@@ -79,11 +81,11 @@ float latFromY(float y){
 void act_on_mouse_click(ezgl::application* app, GdkEventButton*, double x, double y) {
   LatLon clicked_pos(latFromY(y), lonFromX(x));
   selected_intersection = findClosestIntersection(clicked_pos);
-  std::cout << "Clicked: " << intersections[selected_intersection].name << "\n";
   app->refresh_drawing();
 }
 
 void draw_main_canvas (ezgl::renderer *g){
+   auto startTime = std::chrono::high_resolution_clock::now();
    ezgl::rectangle visible_world = g->get_visible_world();
    std::cout << "Drawing canvas with " << intersections.size() << " intersections!" << std::endl;
    g->fill_rectangle(g->get_visible_world());
@@ -92,8 +94,8 @@ void draw_main_canvas (ezgl::renderer *g){
    for(size_t i = 0; i < intersections.size(); ++i){
 
       //make sure to scale these using xfromLon & yFromLat
-      float x = intersections[i].x; 
-      float y = intersections[i].y; 
+      float x = xFromLon(intersections[i].x); 
+      float y = yFromLat(intersections[i].y); 
 
       float width = 50; 
       float height = width; 
@@ -101,6 +103,9 @@ void draw_main_canvas (ezgl::renderer *g){
       //Starting at {x,y} and draw until {x+width, y+height}
       g->fill_rectangle({x, y}, {x+width, y+height});
    }
+   auto currTime = std::chrono::high_resolution_clock::now(); 
+   auto wallClock = std::chrono::duration_cast<std::chrono::duration<double>> (currTime - startTime);
+   std::cout << "Canvas took " << wallClock.count() << " seconds \n";
 
 // Drawing highed intersections from the find feature
 g->set_color(ezgl::YELLOW);
