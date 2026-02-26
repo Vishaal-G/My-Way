@@ -1,5 +1,4 @@
-/* 
- * Copyright 2026 University of Toronto
+/* * Copyright 2026 University of Toronto
  *
  * Permission is hereby granted, to use this software and associated 
  * documentation files (the "Software") in course work at the University 
@@ -54,6 +53,14 @@ struct streetSegments {
     float speedLimit; 
 };
 
+struct MyFeature {
+    ezgl::color color;
+    std::vector<ezgl::point2d> points;
+    bool is_closed; // If it's a polygon (lake/park) or a line (river)
+};
+
+std::vector<MyFeature> features;
+
 // Global vector to hold all street segments
 std::vector<streetSegments> streets;
 
@@ -103,7 +110,24 @@ void draw_main_canvas (ezgl::renderer *g){
    auto startTime = std::chrono::high_resolution_clock::now();
    ezgl::rectangle visible_world = g->get_visible_world();
    std::cout << "Drawing canvas with " << intersections.size() << " intersections!" << std::endl;
-   g->fill_rectangle(g->get_visible_world());
+   
+   // 1. Clear background (set to a "land" color)
+   g->set_color(240, 240, 240); 
+   g->fill_rectangle(visible_world);
+
+   // 2. Draw Features (Water, Parks, etc.)
+   for (const auto& feat : features) {
+       g->set_color(feat.color);
+       if (feat.is_closed && feat.points.size() > 2) {
+           g->fill_poly(feat.points);
+       } else {
+           // It's a river/stream that doesn't close
+           g->set_line_width(1);
+           for (size_t i = 0; i < feat.points.size() - 1; i++) {
+               g->draw_line(feat.points[i], feat.points[i+1]);
+           }
+       }
+   }
 
    // ---------------------------------------------------------
     // Draw street segments with Level of Detail (LOD)
@@ -313,7 +337,6 @@ void drawMap() {
 
       //Get all the curve points so that the streets curve smoothly 
       for (int j = 0; j < info.numCurvePoints; j++) {
-         //LatLon getStreetSegmentCurvePoint(StreetSegmentIdx streetSegmentIdx, int pointNum);
          LatLon curvePos = getStreetSegmentCurvePoint(i, j);
          streets[i].points.push_back({xFromLon(curvePos.longitude()), yFromLat(curvePos.latitude())});
       }
@@ -336,6 +359,57 @@ void drawMap() {
         Mypois[i].y = yFromLat(Mypois[i].position.latitude());
     }
 
+    //Loading Features
+    features.clear();
+    int numFeatures = getNumFeatures();
+    for (int i = 0; i < numFeatures; i++) {
+        MyFeature feat;
+        FeatureType type = getFeatureType(i);
+
+        // Assigning colors based on FeatureType
+        switch (type) {
+            case PARK:
+            case GREENSPACE:
+            case GOLFCOURSE:
+                feat.color = ezgl::color(200, 238, 200); // Soft Green
+                break;
+            case LAKE:
+            case RIVER:
+            case STREAM:
+                feat.color = ezgl::color(170, 218, 255); // Water Blue
+                break;
+            case BEACH:
+                feat.color = ezgl::color(255, 240, 180); // Sand/Beach
+                break;
+            case ISLAND:
+                feat.color = ezgl::color(240, 240, 240); // Land color
+                break;
+            case BUILDING:
+                feat.color = ezgl::color(220, 220, 220); // Light Grey
+                break;
+            case GLACIER:
+                feat.color = ezgl::color(255, 255, 255); // White
+                break;
+            default:
+                feat.color = ezgl::color(230, 230, 230); // Unknown/Other
+                break;
+        }
+        
+        // Loading points for each feature
+        int numPoints = getNumFeaturePoints(i);
+        for (int j = 0; j < numPoints; j++) {
+            LatLon pos = getFeaturePoint(i, j);
+            feat.points.push_back({xFromLon(pos.longitude()), yFromLat(pos.latitude())});
+        }
+
+        // Determining if the feature is a closed polygon
+        feat.is_closed = (feat.points.size() > 2 &&
+                          feat.points.front().x == feat.points.back().x &&
+                          feat.points.front().y == feat.points.back().y);
+        
+        features.push_back(feat);
+    }
+
    ezgl::application::settings settings;
    settings.main_ui_resource = "libstreetmap/resources/main.ui"; 
    settings.window_identifier = "MainWindow";
@@ -345,7 +419,7 @@ void drawMap() {
    ezgl::application application(settings);
 
 
-   //Creates canvas of 1000x1000 
+   //Creates canvas of map size
    ezgl::rectangle initial_world({xFromLon(minLon), yFromLat(minLat)}, {xFromLon(maxLon), yFromLat(maxLat)});
    application.add_canvas("MainCanvas", draw_main_canvas, initial_world);
 
