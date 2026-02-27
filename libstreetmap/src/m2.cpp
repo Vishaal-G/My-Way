@@ -28,10 +28,10 @@
 #include <algorithm>
 #include <chrono>
 #include <sstream>
+#include <unordered_set> // Added for deduplication
 
 double cos_lat_avg;
 void draw_main_canvas (ezgl::renderer *g);
-
 
 struct Intersection{
    LatLon position;
@@ -51,6 +51,7 @@ struct streetSegments {
     // Stores the start, end, and any intermediate curve points in order
     std::vector<ezgl::point2d> points; 
     float speedLimit; 
+    std::string name; // Store the street name
 };
 
 struct MyFeature {
@@ -138,7 +139,6 @@ void draw_main_canvas (ezgl::renderer *g){
 
        float speed_kmh = seg.speedLimit * 3.6f;
 
-       
         //Dont graph minor streets when really zoomed out 
         if (current_zoom_width > 15000 && speed_kmh <= 50) {
             continue; 
@@ -167,6 +167,58 @@ void draw_main_canvas (ezgl::renderer *g){
             g->draw_line(seg.points[i], seg.points[i+1]);
         }
     }
+
+    // ---------------------------------------------------------
+    // Draw street names (After drawing lines to avoid overlaps)
+    // ---------------------------------------------------------
+    g->set_color(ezgl::BLACK);
+    g->set_font_size(9); // Set a reasonable font size
+
+    // Keep track of names already drawn to prevent the "jumbled" blob
+    std::unordered_set<std::string> names_drawn_this_frame;
+
+    for (const auto& seg : streets) {
+        float speed_kmh = seg.speedLimit * 3.6f;
+        
+        // 1. Deduplication: Skip if we already labeled this street in this view
+        if (names_drawn_this_frame.count(seg.name)) continue;
+
+        // 2. Skip names for minor streets if zoomed out
+        if (current_zoom_width > 15000) continue; // Hide all names when very far
+        if (current_zoom_width > 8000 && speed_kmh < 70) continue;
+        if (current_zoom_width > 3000 && speed_kmh < 40) continue;
+        if (seg.name == "<unknown>") continue;
+
+        // Draw name on the longest segment of the street for better visibility
+        if (seg.points.size() >= 2) {
+            size_t mid_idx = seg.points.size() / 2;
+            ezgl::point2d p1 = seg.points[mid_idx - 1];
+            ezgl::point2d p2 = seg.points[mid_idx];
+
+            // Only draw if the segment is visible on screen
+            if (visible_world.contains(p1) || visible_world.contains(p2)) {
+                double dx = p2.x - p1.x;
+                double dy = p2.y - p1.y;
+
+                // 3. Collision Avoidance: Only draw if the segment is long enough for the text
+                double seg_len = std::sqrt(dx*dx + dy*dy);
+                if (seg_len < (seg.name.length() * 7)) continue; 
+
+                double angle = atan2(dy, dx) * 180 / M_PI;
+
+                // Keep text upright (between -90 and 90 degrees)
+                if (angle > 90) angle -= 180;
+                else if (angle < -90) angle += 180;
+
+                g->set_text_rotation(angle);
+                g->draw_text({(p1.x + p2.x)/2, (p1.y + p2.y)/2}, seg.name);
+
+                // Add to set so we don't draw this specific name again until the next refresh
+                names_drawn_this_frame.insert(seg.name);
+            }
+        }
+    }
+    g->set_text_rotation(0); // Reset rotation
    
    //Draws all intersections (mainly used to store intersections)
    g->set_color(0, 0, 0);  
@@ -330,6 +382,7 @@ void drawMap() {
       //Get the information about the street segment (to, from, curve points, id, one way, speed limit)
       StreetSegmentInfo info = getStreetSegmentInfo(i);
       streets[i].speedLimit = info.speedLimit;
+      streets[i].name = getStreetName(info.streetID); // Store name from M1
 
       //Get starting intersection 
       LatLon fromPos = getIntersectionPosition(info.from);
@@ -417,7 +470,6 @@ void drawMap() {
     
    //Create the ezgl application 
    ezgl::application application(settings);
-
 
    //Creates canvas of map size
    ezgl::rectangle initial_world({xFromLon(minLon), yFromLat(minLat)}, {xFromLon(maxLon), yFromLat(maxLat)});
