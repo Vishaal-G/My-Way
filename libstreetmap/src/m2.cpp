@@ -7,6 +7,7 @@
 #include "ezgl/graphics.hpp"
 #include <cmath>
 #include <algorithm>
+#include <unordered_map>
 #include <chrono>
 #include <sstream>
 #include <unordered_set>
@@ -41,6 +42,28 @@ struct MyFeature {
   std::vector<ezgl::point2d> points;
   bool is_closed;
 };
+
+
+// --- Subway Structures ---
+struct SubwayLine {
+    std::string name;
+    ezgl::color color;
+    std::vector<std::vector<ezgl::point2d>> tracks; 
+};
+
+struct SubwayStation {
+    std::string name;
+    ezgl::point2d position;
+};
+
+// Global vector for drawing
+std::vector<SubwayLine> subway_lines;
+std::vector<SubwayStation> subway_stations; // Add this line!
+
+
+// Hash maps to quickly look up OSM pointers by their ID
+std::unordered_map<OSMID, const OSMWay*> osm_ways_map;
+std::unordered_map<OSMID, const OSMNode*> osm_nodes_map;
 
 // Global Data Structures
 std::vector<MyFeature> features;
@@ -92,6 +115,23 @@ bool ends_with(const std::string &text, const std::string &suffix) {
 }
 
 static bool is_night_mode = false;
+
+ezgl::color parse_hex_color(std::string hex_str) {
+    if (hex_str.empty()) return ezgl::color(0, 100, 200); // Default blue
+    if (hex_str[0] == '#') hex_str = hex_str.substr(1);
+    
+    if (hex_str.length() == 6) {
+        try {
+            unsigned long val = std::stoul(hex_str, nullptr, 16);
+            uint8_t r = (val >> 16) & 0xFF;
+            uint8_t g = (val >> 8) & 0xFF;
+            uint8_t b = val & 0xFF;
+            // Add a slight transparency (200) so they blend nicely on the map
+            return ezgl::color(r, g, b, 200); 
+        } catch (...) {}
+    }
+    return ezgl::color(0, 100, 200);
+}
 
 void discover_map_paths() {
   namespace fs = std::filesystem;
@@ -212,10 +252,108 @@ void load_map_data() {
     features.push_back(feat);
   }
 
+  // ---------------------------------------------------
+  // Load Subway Lines from OSM
+  // ---------------------------------------------------
+  subway_lines.clear();
+  osm_nodes_map.clear();
+  osm_ways_map.clear();
+
+  // 1. Build fast lookup maps for Nodes and Ways
+  for (int i = 0; i < getNumberOfNodes(); ++i) {
+      const OSMNode* node = getNodeByIndex(i);
+      osm_nodes_map[node->id()] = node;
+  }
+  for (int i = 0; i < getNumberOfWays(); ++i) {
+      const OSMWay* way = getWayByIndex(i);
+      osm_ways_map[way->id()] = way;
+  }
+
+  // 2. Loop through all Relations
+  for (int i = 0; i < getNumberOfRelations(); ++i) {
+      const OSMRelation* rel = getRelationByIndex(i);
+      
+      bool is_subway = false;
+      std::string name = "Unknown Line";
+      std::string hex_color = "";
+      
+      // 3. Check tags to identify subway routes
+      int tagCount = getTagCount(rel);
+      for (int j = 0; j < tagCount; ++j) {
+          std::pair<std::string, std::string> tag = getTagPair(rel, j); //
+          
+          if (tag.first == "route" && tag.second == "subway") is_subway = true;
+          if (tag.first == "name") name = tag.second;
+          if (tag.first == "colour") hex_color = tag.second;
+      }
+
+      // 4. Extract physical tracks if it is a subway
+      // 4. Extract physical tracks AND stations if it is a subway
+      if (is_subway) {
+          SubwayLine line;
+          line.name = name;
+          line.color = parse_hex_color(hex_color);
+          
+          std::vector<TypedOSMID> members = getRelationMembers(rel); 
+          std::vector<std::string> roles = getRelationMemberRoles(rel); // We need the roles to find stations
+          
+          for (size_t k = 0; k < members.size(); ++k) {
+              const auto& member = members[k];
+              const std::string& role = roles[k];
+              
+              // --- A. Extract Tracks ---
+              if (member.type() == TypedOSMID::Way) {
+                  auto way_it = osm_ways_map.find(member);
+                  if (way_it != osm_ways_map.end()) {
+                      const OSMWay* way = way_it->second;
+                      std::vector<ezgl::point2d> track_points;
+                      
+                      const std::vector<OSMID>& nds = getWayMembers(way); 
+                      
+                      for (OSMID nd_id : nds) {
+                          auto node_it = osm_nodes_map.find(nd_id);
+                          if (node_it != osm_nodes_map.end()) {
+                              LatLon ll = getNodeCoords(node_it->second); 
+                              track_points.push_back({xFromLon(ll.longitude()), yFromLat(ll.latitude())});
+                          }
+                      }
+                      
+                      if (!track_points.empty()) {
+                          line.tracks.push_back(track_points);
+                      }
+                  }
+              }
+              // --- B. Extract Stations ---
+              else if (member.type() == TypedOSMID::Node) {
+                  if (role == "stop" || role == "station" || role == "platform") {
+                      auto node_it = osm_nodes_map.find(member);
+                      if (node_it != osm_nodes_map.end()) {
+                          const OSMNode* node = node_it->second;
+                          LatLon ll = getNodeCoords(node);
+                          
+                          std::string station_name = "";
+                          for (int t = 0; t < getTagCount(node); ++t) {
+                              auto tag = getTagPair(node, t);
+                              if (tag.first == "name") station_name = tag.second;
+                          }
+                          
+                          SubwayStation st;
+                          st.name = station_name;
+                          st.position = {xFromLon(ll.longitude()), yFromLat(ll.latitude())};
+                          subway_stations.push_back(st);
+                      }
+                  }
+              }
+          }
+          subway_lines.push_back(line);
+      }
+  }
+
     g_map_world = ezgl::rectangle(
         {xFromLon(global_minLon), yFromLat(global_minLat)},
         {xFromLon(global_maxLon), yFromLat(global_maxLat)}
   );
+
 }
 
 // ----------------------------------------------------------------------------
@@ -416,6 +554,7 @@ static void zoom_out_button(GtkWidget*, gpointer data) {
   app->refresh_drawing();
 }
 
+
 void load_selected_map(GtkWidget*, gpointer data) {
   auto *app = static_cast<ezgl::application *>(data);
 
@@ -427,18 +566,31 @@ void load_selected_map(GtkWidget*, gpointer data) {
 
   std::string new_map_path = discovered_map_paths[active_idx];
 
+  // 1. Close BOTH old databases
   closeMap();
+  closeOSMDatabase(); 
 
+  // 2. Load the new Streets API
   bool load_success = loadMap(new_map_path);
-  if (!load_success) {
-    std::cerr << "Failed to load map: " << new_map_path << std::endl;
+  
+  // 3. Create the OSM path and load the new OSM API
+  std::string osm_path = new_map_path;
+  size_t pos = osm_path.find(".streets.bin");
+  if (pos != std::string::npos) {
+      osm_path.replace(pos, 12, ".osm.bin");
+  }
+  bool osm_success = loadOSMDatabaseBIN(osm_path);
+
+  if (!load_success || !osm_success) {
+    std::cerr << "Failed to load map or OSM data." << std::endl;
     return;
   }
 
+  // 4. NOW extract the data into our vectors
   load_map_data();
-
   build_autocomplete_store();
 
+  // 5. Update UI components
   GtkEntry *top_search = GTK_ENTRY(app->get_object("TopSearch"));
   GtkEntry *e1 = GTK_ENTRY(app->get_object("Street1Entry"));
   GtkEntry *e2 = GTK_ENTRY(app->get_object("Street2Entry"));
@@ -456,6 +608,7 @@ void load_selected_map(GtkWidget*, gpointer data) {
     if (c) gtk_entry_completion_set_model(c, GTK_TREE_MODEL(autocomplete_store));
   }
 
+  // 6. Reset camera boundaries
   ezgl::rectangle new_world({xFromLon(global_minLon), yFromLat(global_minLat)},
                             {xFromLon(global_maxLon), yFromLat(global_maxLat)});
   g_map_world = new_world;
@@ -467,6 +620,8 @@ void load_selected_map(GtkWidget*, gpointer data) {
 
   app->refresh_drawing();
 }
+  
+
 
 static void on_night_mode_toggled(GObject *object, GParamSpec *pspec, gpointer data) {
     // Update our global state to match the switch
@@ -586,13 +741,55 @@ void draw_main_canvas(ezgl::renderer *g) {
       else { g->set_color(ezgl::color(100, 100, 100)); g->set_line_width(3); } // Dark grey
     } else {
       if (speed_kmh >= 80) { g->set_color(ezgl::ORANGE); g->set_line_width(3); }
-      else if (speed_kmh >= 60) { g->set_color(ezgl::BLUE); g->set_line_width(2); }
+      else if (speed_kmh >= 60) { g->set_color(ezgl::YELLOW); g->set_line_width(2); }
       else { g->set_color(250, 250, 250); g->set_line_width(3); }
     }
 
     for (size_t i = 0; i < seg.points.size() - 1; i++) {
       g->draw_line(seg.points[i], seg.points[i + 1]);
     }
+  }
+
+  // ---------------------------------------------------
+  // Draw Subway Lines
+  // ---------------------------------------------------
+  if (current_zoom_width < 25000) { 
+      g->set_line_width(4); 
+      
+      for (const auto& line : subway_lines) {
+          g->set_color(line.color);
+          
+          for (const auto& track : line.tracks) {
+              for (size_t i = 0; i < track.size() - 1; ++i) {
+                  g->draw_line(track[i], track[i + 1]);
+              }
+          }
+      }
+  }
+  // ---------------------------------------------------
+  // Draw Subway Stations
+  // ---------------------------------------------------
+  if (current_zoom_width < 15000) { 
+      for (const auto& station : subway_stations) {
+          
+          // 1. Draw the station marker (white circle with black border)
+          g->set_color(ezgl::WHITE);
+          g->fill_arc(station.position, 15, 0, 360); // Adjust '15' for circle size
+          
+          g->set_color(ezgl::BLACK);
+          g->set_line_width(1);
+          g->draw_arc(station.position, 15, 0, 360);
+
+          // 2. Draw the station name if zoomed in close enough
+          if (current_zoom_width < 6000 && !station.name.empty()) {
+              if (is_night_mode) g->set_color(ezgl::WHITE);
+              else g->set_color(ezgl::BLACK);
+              
+              g->set_font_size(10);
+              // Shift the text down slightly so it doesn't cover the circle
+              g->draw_text({station.position.x, station.position.y + 25}, station.name); 
+          }
+      }
   }
 
   // 4. Text Colors
