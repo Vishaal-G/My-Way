@@ -37,7 +37,7 @@ struct streetSegments {
 };
 
 struct MyFeature {
-  ezgl::color color;
+  FeatureType type;
   std::vector<ezgl::point2d> points;
   bool is_closed;
 };
@@ -90,6 +90,8 @@ bool ends_with(const std::string &text, const std::string &suffix) {
   if (suffix.size() > text.size()) return false;
   return text.compare(text.size() - suffix.size(), suffix.size(), suffix) == 0;
 }
+
+static bool is_night_mode = false;
 
 void discover_map_paths() {
   namespace fs = std::filesystem;
@@ -194,19 +196,8 @@ void load_map_data() {
     MyFeature feat;
     FeatureType type = getFeatureType(i);
 
-    switch (type) {
-      case PARK:
-      case GREENSPACE:
-      case GOLFCOURSE: feat.color = ezgl::color(200, 238, 200); break;
-      case LAKE:
-      case RIVER:
-      case STREAM: feat.color = ezgl::color(170, 218, 255); break;
-      case BEACH: feat.color = ezgl::color(255, 240, 180); break;
-      case ISLAND: feat.color = ezgl::color(240, 240, 240); break;
-      case BUILDING: feat.color = ezgl::color(220, 220, 220); break;
-      case GLACIER: feat.color = ezgl::color(255, 255, 255); break;
-      default: feat.color = ezgl::color(230, 230, 230); break;
-    }
+    // Save the type directly instead of resolving the color here
+    feat.type = type;
 
     int numPoints = getNumFeaturePoints(i);
     for (int j = 0; j < numPoints; j++) {
@@ -221,9 +212,9 @@ void load_map_data() {
     features.push_back(feat);
   }
 
-  g_map_world = ezgl::rectangle(
-      {xFromLon(global_minLon), yFromLat(global_minLat)},
-      {xFromLon(global_maxLon), yFromLat(global_maxLat)}
+    g_map_world = ezgl::rectangle(
+        {xFromLon(global_minLon), yFromLat(global_minLat)},
+        {xFromLon(global_maxLon), yFromLat(global_maxLat)}
   );
 }
 
@@ -477,6 +468,15 @@ void load_selected_map(GtkWidget*, gpointer data) {
   app->refresh_drawing();
 }
 
+static void on_night_mode_toggled(GObject *object, GParamSpec *pspec, gpointer data) {
+    // Update our global state to match the switch
+    is_night_mode = gtk_switch_get_active(GTK_SWITCH(object));
+    
+    // Force the map to redraw with the new colors
+    auto *app = static_cast<ezgl::application *>(data);
+    app->refresh_drawing();
+}
+
 void initial_setup(ezgl::application *app, bool) {
   GtkWidget *find_btn = GTK_WIDGET(app->get_object("FindButton"));
   if (find_btn) g_signal_connect(find_btn, "clicked", G_CALLBACK(find_button), app);
@@ -486,6 +486,15 @@ void initial_setup(ezgl::application *app, bool) {
 
   GtkWidget* zoom_out_btn = GTK_WIDGET(app->get_object("ZoomOutButton"));
   if (zoom_out_btn) g_signal_connect(zoom_out_btn, "clicked", G_CALLBACK(zoom_out_button), app);
+
+  GtkWidget *night_switch = GTK_WIDGET(app->get_object("NightModeSwitch"));
+  if (night_switch) {
+    // Sync the switch to our default state (false/off)
+    gtk_switch_set_active(GTK_SWITCH(night_switch), is_night_mode);
+    
+    // Connect the signal that fires when the user toggles it
+    g_signal_connect(night_switch, "notify::active", G_CALLBACK(on_night_mode_toggled), app);
+  }
 
   build_autocomplete_store();
 
@@ -511,19 +520,49 @@ void initial_setup(ezgl::application *app, bool) {
   if (load_map_btn) {
     g_signal_connect(load_map_btn, "clicked", G_CALLBACK(load_selected_map), app);
   }
+
+}
+
+ezgl::color get_feature_color(FeatureType type, bool night) {
+    if (night) {
+        switch (type) {
+            case PARK: case GREENSPACE: case GOLFCOURSE: return ezgl::color(35, 75, 45); // Dark green
+            case LAKE: case RIVER: case STREAM: return ezgl::color(25, 50, 90); // Dark blue
+            case BEACH: return ezgl::color(90, 80, 50); // Dark sand
+            case ISLAND: return ezgl::color(40, 40, 40); // Dark land
+            case BUILDING: return ezgl::color(60, 60, 60); // Dark grey
+            case GLACIER: return ezgl::color(150, 150, 180); // Dark ice
+            default: return ezgl::color(50, 50, 50); // Dark generic
+        }
+    } else {
+        switch (type) {
+            case PARK: case GREENSPACE: case GOLFCOURSE: return ezgl::color(200, 238, 200);
+            case LAKE: case RIVER: case STREAM: return ezgl::color(170, 218, 255);
+            case BEACH: return ezgl::color(255, 240, 180);
+            case ISLAND: return ezgl::color(240, 240, 240);
+            case BUILDING: return ezgl::color(220, 220, 220);
+            case GLACIER: return ezgl::color(255, 255, 255);
+            default: return ezgl::color(230, 230, 230);
+        }
+    }
 }
 
 // ----------------------------------------------------------------------------
 // Core Drawing Function
 // ----------------------------------------------------------------------------
+
 void draw_main_canvas(ezgl::renderer *g) {
   ezgl::rectangle visible_world = g->get_visible_world();
 
-  g->set_color(240, 240, 240);
+  // 1. Background Color
+  if (is_night_mode) g->set_color(30, 30, 30);
+  else g->set_color(240, 240, 240);
+  
   g->fill_rectangle(visible_world);
 
+  // 2. Feature Colors
   for (const auto &feat : features) {
-    g->set_color(feat.color);
+    g->set_color(get_feature_color(feat.type, is_night_mode));
     if (feat.is_closed && feat.points.size() > 2) {
       g->fill_poly(feat.points);
     } else {
@@ -534,22 +573,32 @@ void draw_main_canvas(ezgl::renderer *g) {
     }
   }
 
+  // 3. Street Colors
   double current_zoom_width = visible_world.width();
   for (const auto &seg : streets) {
     float speed_kmh = seg.speedLimit * 3.6f;
     if (current_zoom_width > 15000 && speed_kmh <= 50) continue;
     if (current_zoom_width > 5000 && speed_kmh <= 30) continue;
 
-    if (speed_kmh >= 80) { g->set_color(ezgl::ORANGE); g->set_line_width(3); }
-    else if (speed_kmh >= 60) { g->set_color(ezgl::BLUE); g->set_line_width(2); }
-    else { g->set_color(250, 250, 250); g->set_line_width(3); }
+    if (is_night_mode) {
+      if (speed_kmh >= 80) { g->set_color(ezgl::color(180, 100, 20)); g->set_line_width(3); } // Dark orange
+      else if (speed_kmh >= 60) { g->set_color(ezgl::color(50, 100, 180)); g->set_line_width(2); } // Dark blue
+      else { g->set_color(ezgl::color(100, 100, 100)); g->set_line_width(3); } // Dark grey
+    } else {
+      if (speed_kmh >= 80) { g->set_color(ezgl::ORANGE); g->set_line_width(3); }
+      else if (speed_kmh >= 60) { g->set_color(ezgl::BLUE); g->set_line_width(2); }
+      else { g->set_color(250, 250, 250); g->set_line_width(3); }
+    }
 
     for (size_t i = 0; i < seg.points.size() - 1; i++) {
       g->draw_line(seg.points[i], seg.points[i + 1]);
     }
   }
 
-  g->set_color(ezgl::BLACK);
+  // 4. Text Colors
+  if (is_night_mode) g->set_color(ezgl::WHITE);
+  else g->set_color(ezgl::BLACK);
+  
   g->set_font_size(9);
   std::unordered_set<std::string> names_drawn_this_frame;
 

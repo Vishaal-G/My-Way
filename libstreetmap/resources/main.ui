@@ -52,7 +52,7 @@
           </packing>
         </child>
         <child>
-          <!-- n-columns=3 n-rows=11 -->
+          <!-- n-columns=3 n-rows=12 -->
           <object class="GtkGrid" id="InnerGrid">
             <property name="visible">True</property>
             <property name="can-focus">False</property>
@@ -230,7 +230,7 @@
             </child>
             <child>
               <object class="GtkButton" id="LoadMapButton">
-                <property name="label" translatable="yes">button</property>
+                <property name="label" translatable="yes">Load Map</property>
                 <property name="visible">True</property>
                 <property name="can-focus">True</property>
                 <property name="receives-default">True</property>
@@ -239,6 +239,22 @@
                 <property name="left-attach">2</property>
                 <property name="top-attach">10</property>
               </packing>
+            </child>
+            <child>
+              <object class="GtkSwitch" id="NightModeSwitch">
+                <property name="visible">True</property>
+                <property name="can-focus">True</property>
+              </object>
+              <packing>
+                <property name="left-attach">1</property>
+                <property name="top-attach">11</property>
+              </packing>
+            </child>
+            <child>
+              <placeholder/>
+            </child>
+            <child>
+              <placeholder/>
             </child>
             <child>
               <placeholder/>
