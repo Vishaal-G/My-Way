@@ -521,10 +521,25 @@ static gboolean on_autocomplete_match_selected(GtkEntryCompletion*,
     // ─────────────────────────────────────────────────────────────────────
   }
 
-  if (name) g_free(name);
-  search_just_selected = true;
-  app->refresh_drawing();
-  return TRUE;
+std::stringstream ss;
+
+if (type == 0) {
+    ss << "STREET: " << (name ? name : "");
+}
+else if (type == 1) {
+    ss << "POI: " << (name ? name : "");
+}
+else if (type == 2) {
+    ss << "INTERSECTION: " << (name ? name : "");
+}
+
+app->update_message(ss.str());
+
+if (name) g_free(name);
+
+search_just_selected = true;
+app->refresh_drawing();
+return TRUE;
 }
 
 static void attach_autocomplete(GtkEntry *entry, ezgl::application *app) {
