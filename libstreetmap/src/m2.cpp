@@ -387,9 +387,14 @@ void build_autocomplete_store() {
   }
 
   for (int i = 0; i < (int)Mypois.size(); i++) {
+    std::string display_name = Mypois[i].name;
+    int nearest = findClosestIntersection(Mypois[i].position);
+    if (nearest >= 0 && nearest < (int)intersections.size()) {
+      display_name += " (" + intersections[nearest].name + ")";
+    }
     gtk_list_store_append(autocomplete_store, &iter);
     gtk_list_store_set(autocomplete_store, &iter,
-                       COL_NAME, Mypois[i].name.c_str(),
+                       COL_NAME, display_name.c_str(),
                        COL_TYPE, 1,
                        COL_IDX, i,
                        -1);
@@ -431,7 +436,26 @@ static gboolean on_autocomplete_match_selected(GtkEntryCompletion*,
     if (!street_ids.empty()) {
       auto ints = findIntersectionsOfStreet(street_ids[0]);
       highlighted_intersections = ints;
-      if (!ints.empty()) selected_intersection = ints[0];
+      if (!ints.empty()) {
+        selected_intersection = ints[0];
+        ezgl::canvas *c = app->get_canvas("MainCanvas");
+        if (c) {
+          float min_x = intersections[ints[0]].x;
+          float max_x = min_x;
+          float min_y = intersections[ints[0]].y;
+          float max_y = min_y;
+          for (int id : ints) {
+            min_x = std::min(min_x, intersections[id].x);
+            max_x = std::max(max_x, intersections[id].x);
+            min_y = std::min(min_y, intersections[id].y);
+            max_y = std::max(max_y, intersections[id].y);
+          }
+          float pad = std::max((max_x - min_x) * 0.2f, 300.0f);
+          ezgl::rectangle zoom_to({min_x - pad, min_y - pad},
+                                  {max_x + pad, max_y + pad});
+          c->get_camera().set_world(zoom_to);
+        }
+      }
     }
   } else if (type == 1) {
     selected_intersection = -1;
@@ -447,6 +471,14 @@ static gboolean on_autocomplete_match_selected(GtkEntryCompletion*,
   } else if (type == 2) {
     selected_intersection = idx;
     highlighted_intersections.clear();
+    ezgl::canvas *c = app->get_canvas("MainCanvas");
+    if (c && idx < (int)intersections.size()) {
+      float cx = intersections[idx].x;
+      float cy = intersections[idx].y;
+      float half = 300.0f;
+      ezgl::rectangle zoom_to({cx - half, cy - half}, {cx + half, cy + half});
+      c->get_camera().set_world(zoom_to);
+    }
     std::stringstream ss;
     ss << "Intersection: " << intersections[idx].name;
     app->update_message(ss.str());
