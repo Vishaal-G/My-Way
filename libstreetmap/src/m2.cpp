@@ -796,17 +796,22 @@ void draw_main_canvas(ezgl::renderer *g) {
     }
   }
 
-  // 3. Street Colors
+  // 3. Street Colors & Drawing
   double current_zoom_width = visible_world.width();
-  for (const auto &seg : streets) {
+  
+  // Store one-way segments to draw arrows later
+  std::vector<std::pair<StreetSegmentIdx, const streetSegments*>> oneway_segments;
+  
+  for (int idx = 0; idx < (int)streets.size(); ++idx) {
+    const auto &seg = streets[idx];
     float speed_kmh = seg.speedLimit * 3.6f;
     if (current_zoom_width > 15000 && speed_kmh <= 50) continue;
     if (current_zoom_width > 5000 && speed_kmh <= 30) continue;
 
     if (is_night_mode) {
-      if (speed_kmh >= 80) { g->set_color(ezgl::color(180, 100, 20)); g->set_line_width(3); } // Dark orange
-      else if (speed_kmh >= 60) { g->set_color(ezgl::color(50, 100, 180)); g->set_line_width(2); } // Dark blue
-      else { g->set_color(ezgl::color(100, 100, 100)); g->set_line_width(3); } // Dark grey
+      if (speed_kmh >= 80) { g->set_color(ezgl::color(180, 100, 20)); g->set_line_width(3); }
+      else if (speed_kmh >= 60) { g->set_color(ezgl::color(50, 100, 180)); g->set_line_width(2); }
+      else { g->set_color(ezgl::color(100, 100, 100)); g->set_line_width(3); }
     } else {
       if (speed_kmh >= 80) { g->set_color(ezgl::ORANGE); g->set_line_width(3); }
       else if (speed_kmh >= 60) { g->set_color(ezgl::YELLOW); g->set_line_width(2); }
@@ -815,6 +820,178 @@ void draw_main_canvas(ezgl::renderer *g) {
 
     for (size_t i = 0; i < seg.points.size() - 1; i++) {
       g->draw_line(seg.points[i], seg.points[i + 1]);
+    }
+    
+    // Check if this segment is one-way and should show arrows
+    // Don't show arrows on highways (>= 80 km/h)
+    StreetSegmentInfo info = getStreetSegmentInfo(idx);
+    if (info.oneWay && speed_kmh < 80) {
+      oneway_segments.push_back({idx, &seg});
+    }
+  }
+
+  // Draw one-way arrows with spacing control
+  if (current_zoom_width < 8000) { // Only show arrows when zoomed in enough
+    
+    // Track arrow positions to avoid overlap
+    std::vector<ezgl::point2d> arrow_positions;
+    const double MIN_ARROW_DISTANCE = 120.0; // Minimum distance between arrows
+    
+    // Determine how many arrows to skip based on zoom level
+    int skip_factor = 1;
+    if (current_zoom_width > 4000) skip_factor = 3;      // Very zoomed out: show 1/3
+    else if (current_zoom_width > 2000) skip_factor = 2; // Medium zoom: show 1/2
+    else skip_factor = 1;                                 // Zoomed in: show all
+    
+    int arrow_counter = 0;
+    
+    for (const auto &pair : oneway_segments) {
+      // Skip some arrows based on zoom level to reduce congestion
+      if (arrow_counter % skip_factor != 0) {
+        arrow_counter++;
+        continue;
+      }
+      arrow_counter++;
+      
+      int seg_idx = pair.first;
+      const streetSegments* seg = pair.second;
+      
+      StreetSegmentInfo info = getStreetSegmentInfo(seg_idx);
+      
+      if (seg->points.size() < 2) continue;
+      
+      // Find the middle segment to place arrow on
+      size_t mid_idx = seg->points.size() / 2;
+      
+      ezgl::point2d start_pt, end_pt;
+      if (seg->points.size() == 2) {
+        start_pt = seg->points[0];
+        end_pt = seg->points[1];
+      } else {
+        // Use the segment at the midpoint
+        start_pt = seg->points[mid_idx - 1];
+        end_pt = seg->points[mid_idx];
+      }
+      
+      // Skip if not visible
+      if (!visible_world.contains(start_pt) && !visible_world.contains(end_pt)) {
+        continue;
+      }
+      
+      // Calculate direction vector
+      double dx = end_pt.x - start_pt.x;
+      double dy = end_pt.y - start_pt.y;
+      double len = std::sqrt(dx * dx + dy * dy);
+      
+      if (len < 1.0) continue; // Skip very short segments
+      
+      // Normalize
+      dx /= len;
+      dy /= len;
+      
+      // IMPORTANT: Place arrow EXACTLY on the line segment (at midpoint of this segment)
+      ezgl::point2d arrow_pos = {
+        (start_pt.x + end_pt.x) / 2.0,
+        (start_pt.y + end_pt.y) / 2.0
+      };
+      
+      // Check for overlap with existing arrows and adjust position
+      bool overlap_found = true;
+      int max_attempts = 5;
+      int attempt = 0;
+      
+      while (overlap_found && attempt < max_attempts) {
+        overlap_found = false;
+        
+        for (const auto &existing_pos : arrow_positions) {
+          double dist = std::sqrt(
+            (arrow_pos.x - existing_pos.x) * (arrow_pos.x - existing_pos.x) +
+            (arrow_pos.y - existing_pos.y) * (arrow_pos.y - existing_pos.y)
+          );
+          
+          if (dist < MIN_ARROW_DISTANCE) {
+            overlap_found = true;
+            break;
+          }
+        }
+        
+        if (overlap_found) {
+          // Move arrow along the street segment direction
+          attempt++;
+          double offset = (attempt % 2 == 0 ? 1 : -1) * attempt * 50.0;
+          
+          // Keep the arrow on the line by moving along dx, dy direction
+          ezgl::point2d test_pos = {
+            (start_pt.x + end_pt.x) / 2.0 + dx * offset,
+            (start_pt.y + end_pt.y) / 2.0 + dy * offset
+          };
+          
+          // Check if test position is within the segment bounds
+          // Calculate parameter t along the segment
+          double t = 0.5 + offset / len;
+          
+          // Only accept if still within reasonable bounds of the segment
+          if (t >= 0.1 && t <= 0.9) {
+            arrow_pos = test_pos;
+          } else {
+            // Can't adjust within segment, skip this arrow
+            break;
+          }
+        }
+      }
+      
+      // If we still have overlap after max attempts, skip this arrow
+      if (overlap_found) continue;
+      
+      // Record this arrow position
+      arrow_positions.push_back(arrow_pos);
+      
+      // Arrow size based on zoom
+      double arrow_length = std::min(60.0, current_zoom_width / 100.0);
+      double arrow_width = arrow_length * 0.6;
+      
+      // Calculate arrow tip and two base points
+      ezgl::point2d tip = {
+        arrow_pos.x + dx * arrow_length,
+        arrow_pos.y + dy * arrow_length
+      };
+      
+      // Perpendicular vector for arrow wings
+      double perp_x = -dy;
+      double perp_y = dx;
+      
+      ezgl::point2d base1 = {
+        arrow_pos.x + perp_x * arrow_width / 2.0,
+        arrow_pos.y + perp_y * arrow_width / 2.0
+      };
+      
+      ezgl::point2d base2 = {
+        arrow_pos.x - perp_x * arrow_width / 2.0,
+        arrow_pos.y - perp_y * arrow_width / 2.0
+      };
+      
+      // Draw filled arrow triangle
+      std::vector<ezgl::point2d> arrow_points = {tip, base1, base2};
+      
+      // Set arrow color (contrasting with street)
+      if (is_night_mode) {
+        g->set_color(ezgl::WHITE);
+      } else {
+        g->set_color(ezgl::BLACK);
+      }
+      
+      g->fill_poly(arrow_points);
+      
+      // Draw outline for better visibility
+      if (is_night_mode) {
+        g->set_color(ezgl::BLACK);
+      } else {
+        g->set_color(ezgl::WHITE);
+      }
+      g->set_line_width(1);
+      g->draw_line(tip, base1);
+      g->draw_line(base1, base2);
+      g->draw_line(base2, tip);
     }
   }
 
@@ -834,33 +1011,30 @@ void draw_main_canvas(ezgl::renderer *g) {
           }
       }
   }
+  
   // ---------------------------------------------------
   // Draw Subway Stations
   // ---------------------------------------------------
   if (current_zoom_width < 15000) { 
       for (const auto& station : subway_stations) {
-          
-          // 1. Draw the station marker (white circle with black border)
           g->set_color(ezgl::WHITE);
-          g->fill_arc(station.position, 15, 0, 360); // Adjust '15' for circle size
+          g->fill_arc(station.position, 15, 0, 360);
           
           g->set_color(ezgl::BLACK);
           g->set_line_width(1);
           g->draw_arc(station.position, 15, 0, 360);
 
-          // 2. Draw the station name if zoomed in close enough
           if (current_zoom_width < 6000 && !station.name.empty()) {
               if (is_night_mode) g->set_color(ezgl::WHITE);
               else g->set_color(ezgl::BLACK);
               
               g->set_font_size(10);
-              // Shift the text down slightly so it doesn't cover the circle
               g->draw_text({station.position.x, station.position.y + 25}, station.name); 
           }
       }
   }
 
-  // 4. Text Colors
+  // 4. Street Name Text
   if (is_night_mode) g->set_color(ezgl::WHITE);
   else g->set_color(ezgl::BLACK);
   
@@ -898,18 +1072,21 @@ void draw_main_canvas(ezgl::renderer *g) {
   }
   g->set_text_rotation(0);
 
+  // 5. Highlighted Intersections
   g->set_color(ezgl::YELLOW);
   for (int id : highlighted_intersections) {
     ezgl::point2d center = {intersections[id].x, intersections[id].y};
     g->fill_arc(center, 50, 0, 360);
   }
 
+  // 6. Selected Intersection
   if (selected_intersection != -1) {
     ezgl::point2d center = {intersections[selected_intersection].x, intersections[selected_intersection].y};
     g->set_color(ezgl::RED);
     g->fill_arc(center, 3, 0, 360);
   }
 
+  // 7. POIs
   if (visible_world.width() < 5000) {
     g->set_color(ezgl::BLUE);
     for (const auto &poi : Mypois) {
@@ -924,8 +1101,7 @@ void draw_main_canvas(ezgl::renderer *g) {
     }
   }
 
-  // Magenta search marker - drawn last so it's always on top
-  // Clears when user clicks anywhere on the map
+  // 8. Search Result Markers
   if (search_result_is_poi) {
     g->set_color(ezgl::color(255, 0, 255));
     g->fill_arc({search_result_x, search_result_y}, 100, 0, 360);
