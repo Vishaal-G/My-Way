@@ -83,6 +83,12 @@ static ezgl::rectangle g_map_world;
 static GtkListStore *autocomplete_store = nullptr;
 enum { COL_NAME = 0, COL_TYPE, COL_IDX, N_COLS };
 
+static int search_result_intersection = -1;
+static float search_result_x = -1;
+static float search_result_y = -1;
+static bool search_result_is_poi = false;
+static bool search_just_selected = false;
+
 // Coordinate conversion declarations
 float xFromLon(float lon);
 float yFromLat(float lat);
@@ -172,6 +178,12 @@ void discover_map_paths() {
 void load_map_data() {
   selected_intersection = -1;
   highlighted_intersections.clear();
+
+  search_result_intersection = -1;
+  search_result_x = -1;
+  search_result_y = -1;
+  search_result_is_poi = false;
+  search_just_selected = false;
 
   if (getNumIntersections() == 0) return;
 
@@ -429,6 +441,11 @@ static gboolean on_autocomplete_match_selected(GtkEntryCompletion*,
                      COL_IDX, &idx,
                      -1);
 
+  search_result_intersection = -1;
+  search_result_x = -1;
+  search_result_y = -1;
+  search_result_is_poi = false;
+
   if (type == 0) {
     auto street_ids = findStreetIdsFromPartialStreetName(name ? name : "");
     highlighted_intersections.clear();
@@ -455,6 +472,8 @@ static gboolean on_autocomplete_match_selected(GtkEntryCompletion*,
                                   {max_x + pad, max_y + pad});
           c->get_camera().set_world(zoom_to);
         }
+        search_result_is_poi = false;
+        search_result_intersection = ints[0];
       }
     }
   } else if (type == 1) {
@@ -467,6 +486,9 @@ static gboolean on_autocomplete_match_selected(GtkEntryCompletion*,
       float half = 500.0f;
       ezgl::rectangle zoom_to({cx - half, cy - half}, {cx + half, cy + half});
       c->get_camera().set_world(zoom_to);
+      search_result_is_poi = true;
+      search_result_x = cx;
+      search_result_y = cy;
     }
   } else if (type == 2) {
     selected_intersection = idx;
@@ -482,9 +504,12 @@ static gboolean on_autocomplete_match_selected(GtkEntryCompletion*,
     std::stringstream ss;
     ss << "Intersection: " << intersections[idx].name;
     app->update_message(ss.str());
+    search_result_is_poi = false;
+    search_result_intersection = idx;
   }
 
   if (name) g_free(name);
+  search_just_selected = true;
   app->refresh_drawing();
   return TRUE;
 }
@@ -509,6 +534,17 @@ static void attach_autocomplete(GtkEntry *entry, ezgl::application *app) {
 // Event Handlers & Callbacks
 // ----------------------------------------------------------------------------
 void act_on_mouse_click(ezgl::application *app, GdkEventButton *, double x, double y) {
+  if (search_just_selected) {
+    search_just_selected = false;
+    app->refresh_drawing();
+    return;
+  }
+
+  search_result_intersection = -1;
+  search_result_x = -1;
+  search_result_y = -1;
+  search_result_is_poi = false;
+
   LatLon clicked_pos(latFromY(y), lonFromX(x));
   selected_intersection = findClosestIntersection(clicked_pos);
   if (selected_intersection != -1) {
@@ -886,6 +922,22 @@ void draw_main_canvas(ezgl::renderer *g) {
         }
       }
     }
+  }
+
+  // Magenta search marker - drawn last so it's always on top
+  // Clears when user clicks anywhere on the map
+  if (search_result_is_poi) {
+    g->set_color(ezgl::color(255, 0, 255));
+    g->fill_arc({search_result_x, search_result_y}, 100, 0, 360);
+    g->set_color(ezgl::WHITE);
+    g->fill_arc({search_result_x, search_result_y}, 35, 0, 360);
+  } else if (!search_result_is_poi && search_result_intersection >= 0) {
+    float sx = intersections[search_result_intersection].x;
+    float sy = intersections[search_result_intersection].y;
+    g->set_color(ezgl::color(255, 0, 255));
+    g->fill_arc({sx, sy}, 100, 0, 360);
+    g->set_color(ezgl::WHITE);
+    g->fill_arc({sx, sy}, 35, 0, 360);
   }
 }
 
