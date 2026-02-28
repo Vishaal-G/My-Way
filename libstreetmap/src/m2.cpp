@@ -13,6 +13,7 @@
 #include <unordered_set>
 #include <filesystem>
 #include <set>
+#include "tts.h"   // ← TTS ADDED
 
 double cos_lat_avg;
 void draw_main_canvas(ezgl::renderer *g);
@@ -58,7 +59,7 @@ struct SubwayStation {
 
 // Global vector for drawing
 std::vector<SubwayLine> subway_lines;
-std::vector<SubwayStation> subway_stations; // Add this line!
+std::vector<SubwayStation> subway_stations;
 
 
 // Hash maps to quickly look up OSM pointers by their ID
@@ -123,7 +124,7 @@ bool ends_with(const std::string &text, const std::string &suffix) {
 static bool is_night_mode = false;
 
 ezgl::color parse_hex_color(std::string hex_str) {
-    if (hex_str.empty()) return ezgl::color(0, 100, 200); // Default blue
+    if (hex_str.empty()) return ezgl::color(0, 100, 200);
     if (hex_str[0] == '#') hex_str = hex_str.substr(1);
     
     if (hex_str.length() == 6) {
@@ -132,7 +133,6 @@ ezgl::color parse_hex_color(std::string hex_str) {
             uint8_t r = (val >> 16) & 0xFF;
             uint8_t g = (val >> 8) & 0xFF;
             uint8_t b = val & 0xFF;
-            // Add a slight transparency (200) so they blend nicely on the map
             return ezgl::color(r, g, b, 200); 
         } catch (...) {}
     }
@@ -248,7 +248,6 @@ void load_map_data() {
     MyFeature feat;
     FeatureType type = getFeatureType(i);
 
-    // Save the type directly instead of resolving the color here
     feat.type = type;
 
     int numPoints = getNumFeaturePoints(i);
@@ -271,7 +270,6 @@ void load_map_data() {
   osm_nodes_map.clear();
   osm_ways_map.clear();
 
-  // 1. Build fast lookup maps for Nodes and Ways
   for (int i = 0; i < getNumberOfNodes(); ++i) {
       const OSMNode* node = getNodeByIndex(i);
       osm_nodes_map[node->id()] = node;
@@ -281,7 +279,6 @@ void load_map_data() {
       osm_ways_map[way->id()] = way;
   }
 
-  // 2. Loop through all Relations
   for (int i = 0; i < getNumberOfRelations(); ++i) {
       const OSMRelation* rel = getRelationByIndex(i);
       
@@ -289,31 +286,27 @@ void load_map_data() {
       std::string name = "Unknown Line";
       std::string hex_color = "";
       
-      // 3. Check tags to identify subway routes
       int tagCount = getTagCount(rel);
       for (int j = 0; j < tagCount; ++j) {
-          std::pair<std::string, std::string> tag = getTagPair(rel, j); //
+          std::pair<std::string, std::string> tag = getTagPair(rel, j);
           
           if (tag.first == "route" && tag.second == "subway") is_subway = true;
           if (tag.first == "name") name = tag.second;
           if (tag.first == "colour") hex_color = tag.second;
       }
 
-      // 4. Extract physical tracks if it is a subway
-      // 4. Extract physical tracks AND stations if it is a subway
       if (is_subway) {
           SubwayLine line;
           line.name = name;
           line.color = parse_hex_color(hex_color);
           
           std::vector<TypedOSMID> members = getRelationMembers(rel); 
-          std::vector<std::string> roles = getRelationMemberRoles(rel); // We need the roles to find stations
+          std::vector<std::string> roles = getRelationMemberRoles(rel);
           
           for (size_t k = 0; k < members.size(); ++k) {
               const auto& member = members[k];
               const std::string& role = roles[k];
               
-              // --- A. Extract Tracks ---
               if (member.type() == TypedOSMID::Way) {
                   auto way_it = osm_ways_map.find(member);
                   if (way_it != osm_ways_map.end()) {
@@ -335,7 +328,6 @@ void load_map_data() {
                       }
                   }
               }
-              // --- B. Extract Stations ---
               else if (member.type() == TypedOSMID::Node) {
                   if (role == "stop" || role == "station" || role == "platform") {
                       auto node_it = osm_nodes_map.find(member);
@@ -365,7 +357,6 @@ void load_map_data() {
         {xFromLon(global_minLon), yFromLat(global_minLat)},
         {xFromLon(global_maxLon), yFromLat(global_maxLat)}
   );
-
 }
 
 // ----------------------------------------------------------------------------
@@ -378,9 +369,9 @@ void build_autocomplete_store() {
 
   autocomplete_store = gtk_list_store_new(
       N_COLS,
-      G_TYPE_STRING, // COL_NAME
-      G_TYPE_INT,    // COL_TYPE
-      G_TYPE_INT     // COL_IDX
+      G_TYPE_STRING,
+      G_TYPE_INT,
+      G_TYPE_INT
   );
 
   GtkTreeIter iter;
@@ -447,6 +438,7 @@ static gboolean on_autocomplete_match_selected(GtkEntryCompletion*,
   search_result_is_poi = false;
 
   if (type == 0) {
+    // --- Street selected ---
     auto street_ids = findStreetIdsFromPartialStreetName(name ? name : "");
     highlighted_intersections.clear();
     selected_intersection = -1;
@@ -476,7 +468,15 @@ static gboolean on_autocomplete_match_selected(GtkEntryCompletion*,
         search_result_intersection = ints[0];
       }
     }
+
+    // ── TTS: announce street ──────────────────────────────────────────────
+    if (name) {
+      speak(std::string("Street: ") + name);
+    }
+    // ─────────────────────────────────────────────────────────────────────
+
   } else if (type == 1) {
+    // --- POI selected ---
     selected_intersection = -1;
     highlighted_intersections.clear();
     ezgl::canvas *c = app->get_canvas("MainCanvas");
@@ -490,7 +490,16 @@ static gboolean on_autocomplete_match_selected(GtkEntryCompletion*,
       search_result_x = cx;
       search_result_y = cy;
     }
+
+    // ── TTS: announce POI (strip the "(near ...)" part for cleaner speech) 
+    if (name) {
+      std::string clean = Mypois[idx].name; // use raw POI name, no parenthetical
+      speak(std::string("Point of interest: ") + clean);
+    }
+    // ─────────────────────────────────────────────────────────────────────
+
   } else if (type == 2) {
+    // --- Intersection selected ---
     selected_intersection = idx;
     highlighted_intersections.clear();
     ezgl::canvas *c = app->get_canvas("MainCanvas");
@@ -506,6 +515,10 @@ static gboolean on_autocomplete_match_selected(GtkEntryCompletion*,
     app->update_message(ss.str());
     search_result_is_poi = false;
     search_result_intersection = idx;
+
+    // ── TTS: announce intersection ────────────────────────────────────────
+    speak(std::string("Intersection: ") + intersections[idx].name);
+    // ─────────────────────────────────────────────────────────────────────
   }
 
   if (name) g_free(name);
@@ -551,6 +564,10 @@ void act_on_mouse_click(ezgl::application *app, GdkEventButton *, double x, doub
     std::stringstream ss;
     ss << "Intersection Clicked: " << intersections[selected_intersection].name;
     app->update_message(ss.str());
+
+    // ── TTS: speak the clicked intersection name ──────────────────────────
+    speak(std::string("Intersection: ") + intersections[selected_intersection].name);
+    // ─────────────────────────────────────────────────────────────────────
   }
   app->refresh_drawing();
 }
@@ -584,6 +601,19 @@ static void find_button(GtkWidget *, gpointer data) {
   std::string s2 = gtk_entry_get_text(e2);
 
   find_and_highlight(s1, s2);
+
+  // ── TTS: announce find result ─────────────────────────────────────────
+  if (!highlighted_intersections.empty()) {
+    std::ostringstream msg;
+    msg << "Found " << highlighted_intersections.size()
+        << (highlighted_intersections.size() == 1 ? " intersection" : " intersections")
+        << " between " << s1 << " and " << s2;
+    speak(msg.str());
+  } else {
+    speak(std::string("No intersections found between ") + s1 + " and " + s2);
+  }
+  // ─────────────────────────────────────────────────────────────────────
+
   app->refresh_drawing();
 }
 
@@ -634,14 +664,11 @@ void load_selected_map(GtkWidget*, gpointer data) {
 
   std::string new_map_path = discovered_map_paths[active_idx];
 
-  // 1. Close BOTH old databases
   closeMap();
   closeOSMDatabase(); 
 
-  // 2. Load the new Streets API
   bool load_success = loadMap(new_map_path);
   
-  // 3. Create the OSM path and load the new OSM API
   std::string osm_path = new_map_path;
   size_t pos = osm_path.find(".streets.bin");
   if (pos != std::string::npos) {
@@ -654,11 +681,9 @@ void load_selected_map(GtkWidget*, gpointer data) {
     return;
   }
 
-  // 4. NOW extract the data into our vectors
   load_map_data();
   build_autocomplete_store();
 
-  // 5. Update UI components
   GtkEntry *top_search = GTK_ENTRY(app->get_object("TopSearch"));
   GtkEntry *e1 = GTK_ENTRY(app->get_object("Street1Entry"));
   GtkEntry *e2 = GTK_ENTRY(app->get_object("Street2Entry"));
@@ -676,7 +701,6 @@ void load_selected_map(GtkWidget*, gpointer data) {
     if (c) gtk_entry_completion_set_model(c, GTK_TREE_MODEL(autocomplete_store));
   }
 
-  // 6. Reset camera boundaries
   ezgl::rectangle new_world({xFromLon(global_minLon), yFromLat(global_minLat)},
                             {xFromLon(global_maxLon), yFromLat(global_maxLat)});
   g_map_world = new_world;
@@ -688,14 +712,9 @@ void load_selected_map(GtkWidget*, gpointer data) {
 
   app->refresh_drawing();
 }
-  
 
-
-static void on_night_mode_toggled(GObject *object, GParamSpec *pspec, gpointer data) {
-    // Update our global state to match the switch
+static void on_night_mode_toggled(GObject *object, GParamSpec*, gpointer data) {
     is_night_mode = gtk_switch_get_active(GTK_SWITCH(object));
-    
-    // Force the map to redraw with the new colors
     auto *app = static_cast<ezgl::application *>(data);
     app->refresh_drawing();
 }
@@ -712,10 +731,7 @@ void initial_setup(ezgl::application *app, bool) {
 
   GtkWidget *night_switch = GTK_WIDGET(app->get_object("NightModeSwitch"));
   if (night_switch) {
-    // Sync the switch to our default state (false/off)
     gtk_switch_set_active(GTK_SWITCH(night_switch), is_night_mode);
-    
-    // Connect the signal that fires when the user toggles it
     g_signal_connect(night_switch, "notify::active", G_CALLBACK(on_night_mode_toggled), app);
   }
 
@@ -743,19 +759,18 @@ void initial_setup(ezgl::application *app, bool) {
   if (load_map_btn) {
     g_signal_connect(load_map_btn, "clicked", G_CALLBACK(load_selected_map), app);
   }
-
 }
 
 ezgl::color get_feature_color(FeatureType type, bool night) {
     if (night) {
         switch (type) {
-            case PARK: case GREENSPACE: case GOLFCOURSE: return ezgl::color(35, 75, 45); // Dark green
-            case LAKE: case RIVER: case STREAM: return ezgl::color(25, 50, 90); // Dark blue
-            case BEACH: return ezgl::color(90, 80, 50); // Dark sand
-            case ISLAND: return ezgl::color(40, 40, 40); // Dark land
-            case BUILDING: return ezgl::color(60, 60, 60); // Dark grey
-            case GLACIER: return ezgl::color(150, 150, 180); // Dark ice
-            default: return ezgl::color(50, 50, 50); // Dark generic
+            case PARK: case GREENSPACE: case GOLFCOURSE: return ezgl::color(35, 75, 45);
+            case LAKE: case RIVER: case STREAM: return ezgl::color(25, 50, 90);
+            case BEACH: return ezgl::color(90, 80, 50);
+            case ISLAND: return ezgl::color(40, 40, 40);
+            case BUILDING: return ezgl::color(60, 60, 60);
+            case GLACIER: return ezgl::color(150, 150, 180);
+            default: return ezgl::color(50, 50, 50);
         }
     } else {
         switch (type) {
@@ -777,13 +792,11 @@ ezgl::color get_feature_color(FeatureType type, bool night) {
 void draw_main_canvas(ezgl::renderer *g) {
   ezgl::rectangle visible_world = g->get_visible_world();
 
-  // 1. Background Color
   if (is_night_mode) g->set_color(30, 30, 30);
   else g->set_color(240, 240, 240);
   
   g->fill_rectangle(visible_world);
 
-  // 2. Feature Colors
   for (const auto &feat : features) {
     g->set_color(get_feature_color(feat.type, is_night_mode));
     if (feat.is_closed && feat.points.size() > 2) {
@@ -796,10 +809,8 @@ void draw_main_canvas(ezgl::renderer *g) {
     }
   }
 
-  // 3. Street Colors & Drawing
   double current_zoom_width = visible_world.width();
   
-  // Store one-way segments to draw arrows later
   std::vector<std::pair<StreetSegmentIdx, const streetSegments*>> oneway_segments;
   
   for (int idx = 0; idx < (int)streets.size(); ++idx) {
@@ -822,31 +833,24 @@ void draw_main_canvas(ezgl::renderer *g) {
       g->draw_line(seg.points[i], seg.points[i + 1]);
     }
     
-    // Check if this segment is one-way and should show arrows
-    // Don't show arrows on highways (>= 80 km/h)
     StreetSegmentInfo info = getStreetSegmentInfo(idx);
     if (info.oneWay && speed_kmh < 80) {
       oneway_segments.push_back({idx, &seg});
     }
   }
 
-  // Draw one-way arrows with spacing control
-  if (current_zoom_width < 8000) { // Only show arrows when zoomed in enough
-    
-    // Track arrow positions to avoid overlap
+  if (current_zoom_width < 8000) {
     std::vector<ezgl::point2d> arrow_positions;
-    const double MIN_ARROW_DISTANCE = 120.0; // Minimum distance between arrows
+    const double MIN_ARROW_DISTANCE = 120.0;
     
-    // Determine how many arrows to skip based on zoom level
     int skip_factor = 1;
-    if (current_zoom_width > 4000) skip_factor = 3;      // Very zoomed out: show 1/3
-    else if (current_zoom_width > 2000) skip_factor = 2; // Medium zoom: show 1/2
-    else skip_factor = 1;                                 // Zoomed in: show all
+    if (current_zoom_width > 4000) skip_factor = 3;
+    else if (current_zoom_width > 2000) skip_factor = 2;
+    else skip_factor = 1;
     
     int arrow_counter = 0;
     
     for (const auto &pair : oneway_segments) {
-      // Skip some arrows based on zoom level to reduce congestion
       if (arrow_counter % skip_factor != 0) {
         arrow_counter++;
         continue;
@@ -860,7 +864,6 @@ void draw_main_canvas(ezgl::renderer *g) {
       
       if (seg->points.size() < 2) continue;
       
-      // Find the middle segment to place arrow on
       size_t mid_idx = seg->points.size() / 2;
       
       ezgl::point2d start_pt, end_pt;
@@ -868,34 +871,28 @@ void draw_main_canvas(ezgl::renderer *g) {
         start_pt = seg->points[0];
         end_pt = seg->points[1];
       } else {
-        // Use the segment at the midpoint
         start_pt = seg->points[mid_idx - 1];
         end_pt = seg->points[mid_idx];
       }
       
-      // Skip if not visible
       if (!visible_world.contains(start_pt) && !visible_world.contains(end_pt)) {
         continue;
       }
       
-      // Calculate direction vector
       double dx = end_pt.x - start_pt.x;
       double dy = end_pt.y - start_pt.y;
       double len = std::sqrt(dx * dx + dy * dy);
       
-      if (len < 1.0) continue; // Skip very short segments
+      if (len < 1.0) continue;
       
-      // Normalize
       dx /= len;
       dy /= len;
       
-      // IMPORTANT: Place arrow EXACTLY on the line segment (at midpoint of this segment)
       ezgl::point2d arrow_pos = {
         (start_pt.x + end_pt.x) / 2.0,
         (start_pt.y + end_pt.y) / 2.0
       };
       
-      // Check for overlap with existing arrows and adjust position
       bool overlap_found = true;
       int max_attempts = 5;
       int attempt = 0;
@@ -916,47 +913,36 @@ void draw_main_canvas(ezgl::renderer *g) {
         }
         
         if (overlap_found) {
-          // Move arrow along the street segment direction
           attempt++;
           double offset = (attempt % 2 == 0 ? 1 : -1) * attempt * 50.0;
           
-          // Keep the arrow on the line by moving along dx, dy direction
           ezgl::point2d test_pos = {
             (start_pt.x + end_pt.x) / 2.0 + dx * offset,
             (start_pt.y + end_pt.y) / 2.0 + dy * offset
           };
           
-          // Check if test position is within the segment bounds
-          // Calculate parameter t along the segment
           double t = 0.5 + offset / len;
           
-          // Only accept if still within reasonable bounds of the segment
           if (t >= 0.1 && t <= 0.9) {
             arrow_pos = test_pos;
           } else {
-            // Can't adjust within segment, skip this arrow
             break;
           }
         }
       }
       
-      // If we still have overlap after max attempts, skip this arrow
       if (overlap_found) continue;
       
-      // Record this arrow position
       arrow_positions.push_back(arrow_pos);
       
-      // Arrow size based on zoom
       double arrow_length = std::min(60.0, current_zoom_width / 100.0);
       double arrow_width = arrow_length * 0.6;
       
-      // Calculate arrow tip and two base points
       ezgl::point2d tip = {
         arrow_pos.x + dx * arrow_length,
         arrow_pos.y + dy * arrow_length
       };
       
-      // Perpendicular vector for arrow wings
       double perp_x = -dy;
       double perp_y = dx;
       
@@ -970,24 +956,15 @@ void draw_main_canvas(ezgl::renderer *g) {
         arrow_pos.y - perp_y * arrow_width / 2.0
       };
       
-      // Draw filled arrow triangle
       std::vector<ezgl::point2d> arrow_points = {tip, base1, base2};
       
-      // Set arrow color (contrasting with street)
-      if (is_night_mode) {
-        g->set_color(ezgl::WHITE);
-      } else {
-        g->set_color(ezgl::BLACK);
-      }
+      if (is_night_mode) g->set_color(ezgl::WHITE);
+      else g->set_color(ezgl::BLACK);
       
       g->fill_poly(arrow_points);
       
-      // Draw outline for better visibility
-      if (is_night_mode) {
-        g->set_color(ezgl::BLACK);
-      } else {
-        g->set_color(ezgl::WHITE);
-      }
+      if (is_night_mode) g->set_color(ezgl::BLACK);
+      else g->set_color(ezgl::WHITE);
       g->set_line_width(1);
       g->draw_line(tip, base1);
       g->draw_line(base1, base2);
@@ -995,9 +972,6 @@ void draw_main_canvas(ezgl::renderer *g) {
     }
   }
 
-  // ---------------------------------------------------
-  // Draw Subway Lines
-  // ---------------------------------------------------
   if (current_zoom_width < 25000) { 
       g->set_line_width(4); 
       
@@ -1012,9 +986,6 @@ void draw_main_canvas(ezgl::renderer *g) {
       }
   }
   
-  // ---------------------------------------------------
-  // Draw Subway Stations
-  // ---------------------------------------------------
   if (current_zoom_width < 15000) { 
       for (const auto& station : subway_stations) {
           g->set_color(ezgl::WHITE);
@@ -1034,7 +1005,6 @@ void draw_main_canvas(ezgl::renderer *g) {
       }
   }
 
-  // 4. Street Name Text
   if (is_night_mode) g->set_color(ezgl::WHITE);
   else g->set_color(ezgl::BLACK);
   
@@ -1072,21 +1042,18 @@ void draw_main_canvas(ezgl::renderer *g) {
   }
   g->set_text_rotation(0);
 
-  // 5. Highlighted Intersections
   g->set_color(ezgl::YELLOW);
   for (int id : highlighted_intersections) {
     ezgl::point2d center = {intersections[id].x, intersections[id].y};
     g->fill_arc(center, 50, 0, 360);
   }
 
-  // 6. Selected Intersection
   if (selected_intersection != -1) {
     ezgl::point2d center = {intersections[selected_intersection].x, intersections[selected_intersection].y};
     g->set_color(ezgl::RED);
     g->fill_arc(center, 3, 0, 360);
   }
 
-  // 7. POIs
   if (visible_world.width() < 5000) {
     g->set_color(ezgl::BLUE);
     for (const auto &poi : Mypois) {
@@ -1101,7 +1068,6 @@ void draw_main_canvas(ezgl::renderer *g) {
     }
   }
 
-  // 8. Search Result Markers
   if (search_result_is_poi) {
     g->set_color(ezgl::color(255, 0, 255));
     g->fill_arc({search_result_x, search_result_y}, 100, 0, 360);
