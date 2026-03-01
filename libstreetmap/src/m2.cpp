@@ -539,7 +539,7 @@ else if (type == 1) {
     ss << "POI: " << (name ? name : "");
 }
 else if (type == 2) {
-    ss << "INTERSECTION: " << (name ? name : "");
+    ss << "INTERSECTION: " << (name ? name : "") << " (click intersection for details)";
 }
 
 app->update_message(ss.str());
@@ -586,14 +586,24 @@ void act_on_mouse_click(ezgl::application *app, GdkEventButton *, double x, doub
   LatLon clicked_pos(latFromY(y), lonFromX(x));
   selected_intersection = findClosestIntersection(clicked_pos);
   if (selected_intersection != -1) {
+
+    int id = selected_intersection;
+
+    auto segs = findStreetSegmentsOfIntersection(id);
+    std::unordered_set<int> street_ids;
+    for (auto seg_id : segs) {
+        street_ids.insert(getStreetSegmentInfo(seg_id).streetID);
+    }
+
     std::stringstream ss;
-    ss << "Intersection Clicked: " << intersections[selected_intersection].name;
+    ss << "Intersection: " << intersections[id].name
+        << " (ID " << id << ")"
+        << " | Connected Streets: " << street_ids.size();
+
     app->update_message(ss.str());
 
-    // ── TTS: speak the clicked intersection name ──────────────────────────
-    speak(std::string("Intersection: ") + intersections[selected_intersection].name);
-    // ─────────────────────────────────────────────────────────────────────
-  }
+    speak(std::string("Intersection: ") + intersections[id].name);
+    }
   app->refresh_drawing();
 }
 
