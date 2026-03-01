@@ -1262,9 +1262,31 @@ void draw_main_canvas(ezgl::renderer *g) {
 
   if (is_night_mode) g->set_color(ezgl::WHITE);
   else g->set_color(ezgl::BLACK);
-  
+
   g->set_font_size(9);
   std::unordered_set<std::string> names_drawn_this_frame;
+
+  // Each entry is {center_x, center_y, half_width, half_height} of a drawn label
+  struct LabelBox { double cx, cy, hw, hh; };
+  std::vector<LabelBox> drawn_label_boxes;
+
+  // Estimate how many world-units one character occupies at this zoom
+  // font size 9 => ~7px per char; scale by zoom so boxes are in world coords
+  // visible_world.width() / canvas_pixel_width ≈ zoom scale
+  // We don't have canvas pixel width here, so use a fixed pixel estimate (1000px typical)
+  double px_per_world = 1000.0 / current_zoom_width; // pixels per world unit
+  double char_w_world = 7.0 / px_per_world;          // world units per character
+  double char_h_world = 12.0 / px_per_world;         // world units for label height
+
+  auto overlaps_any = [&](double cx, double cy, double hw, double hh) -> bool {
+    for (const auto& box : drawn_label_boxes) {
+      if (std::abs(cx - box.cx) < (hw + box.hw) &&
+          std::abs(cy - box.cy) < (hh + box.hh)) {
+        return true;
+      }
+    }
+    return false;
+  };
 
   for (const auto &seg : streets) {
     float speed_kmh = seg.speedLimit * 3.6f;
@@ -1289,8 +1311,25 @@ void draw_main_canvas(ezgl::renderer *g) {
         if (angle > 90) angle -= 180;
         else if (angle < -90) angle += 180;
 
+        double label_cx = (p1.x + p2.x) / 2.0;
+        double label_cy = (p1.y + p2.y) / 2.0;
+        double abs_angle = std::abs(angle);
+        double angle_rad = abs_angle * M_PI / 180.0;
+
+        // For a rotated label, the axis-aligned bounding box shrinks in one
+        // dimension and grows in the other. Approximate with trig:
+        double text_len = seg.name.length() * char_w_world;
+        double label_hw = (text_len * std::cos(angle_rad) + char_h_world * std::sin(angle_rad)) / 2.0;
+        double label_hh = (text_len * std::sin(angle_rad) + char_h_world * std::cos(angle_rad)) / 2.0;
+
+        double pad = char_w_world * 0.6;
+
+        if (overlaps_any(label_cx, label_cy, label_hw + pad, label_hh + pad)) continue;
+
+        drawn_label_boxes.push_back({label_cx, label_cy, label_hw, label_hh});
+
         g->set_text_rotation(angle);
-        g->draw_text({(p1.x + p2.x) / 2, (p1.y + p2.y) / 2}, seg.name);
+        g->draw_text({label_cx, label_cy}, seg.name);
         names_drawn_this_frame.insert(seg.name);
       }
     }
@@ -1325,13 +1364,13 @@ void draw_main_canvas(ezgl::renderer *g) {
    if (visible_world.width() < 5000) {
     // Adaptive sizing based on zoom
     double base_radius = 16.0;
-    double label_threshold = 1200.0;
+    double label_threshold = 800.0;
     double cluster_distance = 80.0;
     
-    if (visible_world.width() > 3000) {
-      base_radius = 18.0;
-      cluster_distance = 120.0;
-      label_threshold = 999999.0; // Don't show labels when far
+    if (visible_world.width() > 2000) {
+      base_radius = 16.0;
+      cluster_distance = 100.0;
+      label_threshold = 0.0; // Don't show labels when far
     } else if (visible_world.width() > 1500) {
       base_radius = 16.0;
       cluster_distance = 40.0;
@@ -1437,28 +1476,60 @@ void draw_main_canvas(ezgl::renderer *g) {
       if (visible_world.width() < label_threshold && count == 1) {
         std::string name = Mypois[cluster.poi_indices[0]].name;
         if (!name.empty() && name != "<unknown>") {
-          if (is_night_mode) g->set_color(ezgl::WHITE);
-          else g->set_color(ezgl::BLACK);
-          g->set_font_size(9);
-          g->draw_text({cluster.center.x, cluster.center.y + radius + 10}, name);
+          double lx = cluster.center.x;
+          double ly = cluster.center.y + radius + 10;
+          double lhw = (name.length() * char_w_world) / 2.0;
+          double lhh = char_h_world / 2.0;
+
+          // Only draw if it doesn't overlap any street label already placed
+          if (!overlaps_any(lx, ly, lhw + char_w_world, lhh + char_h_world * 0.5)) {
+            // Also check it's not too close to any subway line track
+            bool near_subway = false;
+            for (const auto& line : subway_lines) {
+              for (const auto& track : line.tracks) {
+                for (size_t ti = 0; ti + 1 < track.size(); ++ti) {
+                  // Simple AABB check: is label center within ~30 world units of segment
+                  double min_tx = std::min(track[ti].x, track[ti+1].x) - 30;
+                  double max_tx = std::max(track[ti].x, track[ti+1].x) + 30;
+                  double min_ty = std::min(track[ti].y, track[ti+1].y) - 30;
+                  double max_ty = std::max(track[ti].y, track[ti+1].y) + 30;
+                  if (lx >= min_tx && lx <= max_tx && ly >= min_ty && ly <= max_ty) {
+                    near_subway = true;
+                    break;
+                  }
+                }
+                if (near_subway) break;
+              }
+              if (near_subway) break;
+            }
+
+            if (!near_subway) {
+              if (is_night_mode) g->set_color(ezgl::WHITE);
+              else g->set_color(ezgl::BLACK);
+              g->set_font_size(9);
+              g->draw_text({lx, ly}, name);
+              // Register this label so future POI labels don't overlap it either
+              drawn_label_boxes.push_back({lx, ly, lhw, lhh});
+            }
+          }
         }
       }
 
       drawn_pois.push_back({cluster.center, radius});
     }
+  }  // ← closes if (visible_world.width() < 5000)
 
-    if (search_result_is_poi) {
+  // Search result highlight — always draw regardless of zoom
+  if (search_result_is_poi) {
     ezgl::point2d c = {search_result_x, search_result_y};
-    g->set_color(ezgl::color(255, 0, 255, 80));  // soft halo
+    g->set_color(ezgl::color(255, 0, 255, 80));
     g->fill_arc(c, 60, 0, 360);
-    g->set_color(ezgl::WHITE);                  // inner
+    g->set_color(ezgl::WHITE);
     g->fill_arc(c, 20, 0, 360);
-    g->set_color(ezgl::color(255, 0, 255));     // ring
+    g->set_color(ezgl::color(255, 0, 255));
     g->set_line_width(3);
     g->draw_arc(c, 30, 0, 360);
-
-    } else if (!search_result_is_poi && search_result_intersection >= 0) {
-
+  } else if (search_result_intersection >= 0) {
     float sx = intersections[search_result_intersection].x;
     float sy = intersections[search_result_intersection].y;
     ezgl::point2d c = {sx, sy};
@@ -1470,8 +1541,7 @@ void draw_main_canvas(ezgl::renderer *g) {
     g->set_line_width(3);
     g->draw_arc(c, 30, 0, 360);
   }
-}
-}
+}  
 
 void drawMap() {
   load_map_data();
