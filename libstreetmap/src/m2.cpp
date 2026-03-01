@@ -103,6 +103,9 @@ float lonFromX(float x);
 float latFromY(float y);
 void act_on_mouse_click(ezgl::application *app, GdkEventButton *event, double x, double y);
 
+// Global for popup in finding interesctions
+static GtkWidget* active_find_dialog = nullptr;
+
 // ----------------------------------------------------------------------------
 // Coordinate Conversion Functions
 // ----------------------------------------------------------------------------
@@ -615,6 +618,13 @@ static void find_and_highlight(const std::string &street1, const std::string &st
 
 static void find_button(GtkWidget *, gpointer data) {
   auto *app = static_cast<ezgl::application *>(data);
+
+  // Close any previous find popup (always)
+if (active_find_dialog != nullptr) {
+  gtk_widget_destroy(active_find_dialog);
+  active_find_dialog = nullptr;
+}
+
   GtkEntry *e1 = GTK_ENTRY(app->get_object("Street1Entry"));
   GtkEntry *e2 = GTK_ENTRY(app->get_object("Street2Entry"));
 
@@ -622,27 +632,39 @@ static void find_button(GtkWidget *, gpointer data) {
   std::string s2 = gtk_entry_get_text(e2);
 
   find_and_highlight(s1, s2);
+const int MATCH_CAP = 50;
+
+int n_matches = (int)highlighted_intersections.size();
+if (n_matches > MATCH_CAP) {
+  // clear highlights created by find_and_highlight
+  highlighted_intersections.clear();
+
+  // if you also have other highlight vectors/sets, clear them too:
+  // highlighted_street_segments.clear();
+  // highlighted_pois.clear();
+  // highlighted_features.clear();
+
+  selected_intersection = -1;
+
+  std::string msg = "Too many matches (" + std::to_string(n_matches) +
+                    "). Please type 1–2 more letters.";
+  app->update_message(msg);
+  speak(msg); // optional
+
+  app->refresh_drawing();
+  return;
+}
 std::stringstream ss;
 
 if (highlighted_intersections.empty()) {
-  ss << "No intersections found between " << s1 << " and " << s2;
+  ss << "No intersections found between " << s1 << " and " << s2 << ".";
   selected_intersection = -1;
 } else if (highlighted_intersections.size() == 1) {
   int id = highlighted_intersections[0];
   ss << "Intersection Found: " << intersections[id].name;
   selected_intersection = id;  // optional: also mark it as selected
 } else {
-  ss << "Intersections Found: " << highlighted_intersections.size() << ": ";
-
-  int shown = 0;
-  for (int id : highlighted_intersections) {
-    if (shown) ss << " | ";
-    ss << intersections[id].name;
-    shown++;
-    if (shown == 3) break; // don’t spam
-  }
-
-  if ((int)highlighted_intersections.size() > 3) ss << " | ...";
+  ss << "Found " << highlighted_intersections.size() << " intersections.";
   selected_intersection = highlighted_intersections[0];
 }
 
@@ -658,6 +680,59 @@ app->update_message(ss.str());
     speak(std::string("No intersections found between ") + s1 + " and " + s2);
   }
   // ─────────────────────────────────────────────────────────────────────
+
+// ── Popup: show full list if multiple results (non-blocking) ───────────
+if (highlighted_intersections.size() > 1) {
+
+  // Make sure highlights are visible first
+  app->refresh_drawing();
+
+  active_find_dialog = gtk_dialog_new_with_buttons(
+      (std::to_string(highlighted_intersections.size()) +
+       " Possible Intersections: " + s1 + " & " + s2).c_str(),
+      GTK_WINDOW(app->get_object("MainWindow")),
+      GTK_DIALOG_DESTROY_WITH_PARENT,
+      "Close", GTK_RESPONSE_CLOSE,
+      nullptr
+  );
+
+  gtk_window_set_default_size(GTK_WINDOW(active_find_dialog), 420, 360);
+
+  GtkWidget *scroll = gtk_scrolled_window_new(nullptr, nullptr);
+  gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll),
+                                 GTK_POLICY_NEVER,
+                                 GTK_POLICY_AUTOMATIC);
+
+  GtkWidget *text_view = gtk_text_view_new();
+  gtk_text_view_set_editable(GTK_TEXT_VIEW(text_view), FALSE);
+  gtk_text_view_set_cursor_visible(GTK_TEXT_VIEW(text_view), FALSE);
+  gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(text_view), GTK_WRAP_WORD);
+
+  GtkTextBuffer *buf = gtk_text_view_get_buffer(GTK_TEXT_VIEW(text_view));
+  std::ostringstream list_text;
+
+  for (int i = 0; i < (int)highlighted_intersections.size(); i++) {
+    list_text << (i + 1) << ".  "
+              << intersections[highlighted_intersections[i]].name
+              << "\n";
+  }
+
+  gtk_text_buffer_set_text(buf, list_text.str().c_str(), -1);
+
+  gtk_container_add(GTK_CONTAINER(scroll), text_view);
+  gtk_box_pack_start(GTK_BOX(gtk_dialog_get_content_area(GTK_DIALOG(active_find_dialog))),
+                     scroll, TRUE, TRUE, 0);
+
+  // Non-blocking close behavior + reset pointer
+  g_signal_connect(active_find_dialog, "response",
+                   G_CALLBACK(+[](GtkDialog *d, gint, gpointer) {
+                     gtk_widget_destroy(GTK_WIDGET(d));
+                     active_find_dialog = nullptr;
+                   }),
+                   nullptr);
+
+  gtk_widget_show_all(active_find_dialog);
+}
 
   app->refresh_drawing();
 }
