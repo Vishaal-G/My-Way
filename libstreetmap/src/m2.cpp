@@ -589,22 +589,21 @@ void act_on_mouse_click(ezgl::application *app, GdkEventButton *, double x, doub
 
 static void find_and_highlight(const std::string &street1, const std::string &street2) {
   highlighted_intersections.clear();
+
   auto s1 = findStreetIdsFromPartialStreetName(street1);
   auto s2 = findStreetIdsFromPartialStreetName(street2);
+  if (s1.empty() || s2.empty()) return;
 
-  if (s1.empty() || s2.empty()) { std::cout << "Street not found.\n"; return; }
+  std::unordered_set<int> uniq;
 
   for (int id1 : s1) {
     for (int id2 : s2) {
       auto ints = findIntersectionsOfTwoStreets(id1, id2);
-      if (!ints.empty()) {
-        highlighted_intersections = std::move(ints);
-        std::cout << "Found " << highlighted_intersections.size() << " intersections.\n";
-        return;
-      }
+      for (int inter : ints) uniq.insert(inter);
     }
   }
-  std::cout << "Found 0 intersections.\n";
+
+  highlighted_intersections.assign(uniq.begin(), uniq.end());
 }
 
 static void find_button(GtkWidget *, gpointer data) {
@@ -616,7 +615,31 @@ static void find_button(GtkWidget *, gpointer data) {
   std::string s2 = gtk_entry_get_text(e2);
 
   find_and_highlight(s1, s2);
+std::stringstream ss;
 
+if (highlighted_intersections.empty()) {
+  ss << "No intersections found between " << s1 << " and " << s2;
+  selected_intersection = -1;
+} else if (highlighted_intersections.size() == 1) {
+  int id = highlighted_intersections[0];
+  ss << "Intersection Found: " << intersections[id].name;
+  selected_intersection = id;  // optional: also mark it as selected
+} else {
+  ss << "Intersections Found: " << highlighted_intersections.size() << ": ";
+
+  int shown = 0;
+  for (int id : highlighted_intersections) {
+    if (shown) ss << " | ";
+    ss << intersections[id].name;
+    shown++;
+    if (shown == 3) break; // don’t spam
+  }
+
+  if ((int)highlighted_intersections.size() > 3) ss << " | ...";
+  selected_intersection = highlighted_intersections[0];
+}
+
+app->update_message(ss.str());
   // ── TTS: announce find result ─────────────────────────────────────────
   if (!highlighted_intersections.empty()) {
     std::ostringstream msg;
@@ -757,8 +780,8 @@ void initial_setup(ezgl::application *app, bool) {
   GtkEntry *e2 = GTK_ENTRY(app->get_object("Street2Entry"));
 
   if (top_search) attach_autocomplete(top_search, app);
-  if (e1) attach_autocomplete(e1, app);
-  if (e2) attach_autocomplete(e2, app);
+  //if (e1) attach_autocomplete(e1, app);
+  //if (e2) attach_autocomplete(e2, app);
 
   discover_map_paths();
   GtkComboBoxText *map_combo = GTK_COMBO_BOX_TEXT(app->get_object("MapCombo"));
