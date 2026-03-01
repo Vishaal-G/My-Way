@@ -25,6 +25,7 @@ struct Intersection {
   float y;
 };
 
+
 struct MyPOI {
   LatLon position;
   std::string name;
@@ -42,6 +43,11 @@ struct MyFeature {
   FeatureType type;
   std::vector<ezgl::point2d> points;
   bool is_closed;
+};
+
+struct PoiCategory {
+  ezgl::color color;
+  std::string label;
 };
 
 
@@ -797,6 +803,47 @@ void initial_setup(ezgl::application *app, bool) {
   if (load_map_btn) {
     g_signal_connect(load_map_btn, "clicked", G_CALLBACK(load_selected_map), app);
   }
+
+   auto draw_legend_swatch = [](GtkWidget* widget, cairo_t* cr, gpointer color_ptr) -> gboolean {
+    ezgl::color* col = static_cast<ezgl::color*>(color_ptr);
+    cairo_set_source_rgb(cr, col->red/255.0, col->green/255.0, col->blue/255.0);
+    cairo_arc(cr, 8, 8, 6, 0, 2 * M_PI);
+    cairo_fill(cr);
+    return FALSE;
+  };
+
+  static ezgl::color food_col(230, 50, 30);
+  static ezgl::color health_col(220, 20, 120);
+  static ezgl::color edu_col(20, 100, 220);
+  static ezgl::color finance_col(10, 180, 60);
+  static ezgl::color shop_col(200, 30, 200);
+  static ezgl::color emergency_col(200, 0, 0);
+  static ezgl::color transport_col(100, 100, 100);
+  static ezgl::color accommodation_col(230, 140, 0);
+  static ezgl::color services_col(50, 150, 200);
+  static ezgl::color religion_col(140, 70, 180);
+
+  GtkWidget* legend_food = GTK_WIDGET(app->get_object("LegendFood"));
+  GtkWidget* legend_health = GTK_WIDGET(app->get_object("LegendHealth"));
+  GtkWidget* legend_edu = GTK_WIDGET(app->get_object("LegendEducation"));
+  GtkWidget* legend_finance = GTK_WIDGET(app->get_object("LegendFinance"));
+  GtkWidget* legend_shop = GTK_WIDGET(app->get_object("LegendShopping"));
+  GtkWidget* legend_emergency = GTK_WIDGET(app->get_object("LegendEmergency"));
+  GtkWidget* legend_transport      = GTK_WIDGET(app->get_object("LegendTransport"));
+  GtkWidget* legend_accommodation  = GTK_WIDGET(app->get_object("LegendAccommodation"));
+  GtkWidget* legend_services       = GTK_WIDGET(app->get_object("LegendServices"));
+  GtkWidget* legend_religion       = GTK_WIDGET(app->get_object("LegendReligion"));
+
+  if (legend_food) g_signal_connect(legend_food, "draw", G_CALLBACK(+draw_legend_swatch), &food_col);
+  if (legend_health) g_signal_connect(legend_health, "draw", G_CALLBACK(+draw_legend_swatch), &health_col);
+  if (legend_edu) g_signal_connect(legend_edu, "draw", G_CALLBACK(+draw_legend_swatch), &edu_col);
+  if (legend_finance) g_signal_connect(legend_finance, "draw", G_CALLBACK(+draw_legend_swatch), &finance_col);
+  if (legend_shop) g_signal_connect(legend_shop, "draw", G_CALLBACK(+draw_legend_swatch), &shop_col);
+  if (legend_emergency) g_signal_connect(legend_emergency, "draw", G_CALLBACK(+draw_legend_swatch), &emergency_col);
+  if (legend_transport)     g_signal_connect(legend_transport,     "draw", G_CALLBACK(+draw_legend_swatch), &transport_col);
+  if (legend_accommodation) g_signal_connect(legend_accommodation, "draw", G_CALLBACK(+draw_legend_swatch), &accommodation_col);
+  if (legend_services)      g_signal_connect(legend_services,      "draw", G_CALLBACK(+draw_legend_swatch), &services_col);
+  if (legend_religion)      g_signal_connect(legend_religion,      "draw", G_CALLBACK(+draw_legend_swatch), &religion_col);
 }
 
 ezgl::color get_feature_color(FeatureType type, bool night) {
@@ -821,6 +868,54 @@ ezgl::color get_feature_color(FeatureType type, bool night) {
             default: return ezgl::color(230, 230, 230);
         }
     }
+}
+
+static PoiCategory classify_poi(const std::string& type) {
+  static const std::unordered_set<std::string> food = {
+    "restaurant","cafe","fast_food","bar","pub","food_court","ice_cream",
+    "bakery","butcher"
+  };
+  static const std::unordered_set<std::string> health = {
+    "hospital","clinic","doctors","dentist","pharmacy","veterinary"
+  };
+  static const std::unordered_set<std::string> education = {
+    "school","university","college","kindergarten","library"
+  };
+  static const std::unordered_set<std::string> transport = {
+    "bus_station","taxi","car_rental","fuel","parking","charging_station"
+  };
+  static const std::unordered_set<std::string> finance = {
+    "bank","atm","bureau_de_change"
+  };
+  static const std::unordered_set<std::string> shopping = {
+    "marketplace","convenience","supermarket","mall"
+  };
+  static const std::unordered_set<std::string> accommodation = {
+    "hotel","motel","hostel"
+  };
+  static const std::unordered_set<std::string> services = {
+    "post_office","laundry","beauty","hairdresser"
+  };
+  static const std::unordered_set<std::string> religion = {
+    "place_of_worship","church","mosque","synagogue","temple"
+  };
+  static const std::unordered_set<std::string> emergency = {
+    "police","fire_station"
+  };
+
+  // Distinct, vibrant colors that stand out from each other
+  if (food.count(type))          return { ezgl::color(230, 50,  30),   "Food & Drink"    };
+  if (health.count(type))        return { ezgl::color(220, 20,  120),  "Healthcare"      };
+  if (education.count(type))     return { ezgl::color(20,  100, 220),  "Education"       };
+  if (transport.count(type))     return { ezgl::color(100, 100, 100),  "Transport"       };
+  if (finance.count(type))       return { ezgl::color(10,  180, 60),   "Finance"         };
+  if (shopping.count(type))      return { ezgl::color(200, 30,  200),  "Shopping"        };
+  if (accommodation.count(type)) return { ezgl::color(230, 140, 0),    "Accommodation"   };
+  if (services.count(type))      return { ezgl::color(50,  150, 200),  "Services"        };
+  if (religion.count(type))      return { ezgl::color(140, 70,  180),  "Religion"        };
+  if (emergency.count(type))     return { ezgl::color(200, 0,   0),    "Emergency"       };
+  
+  return { ezgl::color(120, 120, 120), "Other" };
 }
 
 // ----------------------------------------------------------------------------
@@ -1105,19 +1200,130 @@ void draw_main_canvas(ezgl::renderer *g) {
     g->fill_arc(center, 3, 0, 360);
   }
 
-  if (visible_world.width() < 5000) {
-    g->set_color(ezgl::BLUE);
-    for (const auto &poi : Mypois) {
-      if (visible_world.contains(poi.x, poi.y)) {
-        g->fill_arc({poi.x, poi.y}, 20, 0, 360);
-        if (visible_world.width() < 1000) {
-          g->set_color(ezgl::BLACK);
-          g->draw_text({poi.x, poi.y + 25}, poi.name);
-          g->set_color(ezgl::BLUE);
+   if (visible_world.width() < 5000) {
+    // Adaptive sizing based on zoom
+    double base_radius = 16.0;
+    double label_threshold = 1200.0;
+    double cluster_distance = 80.0;
+    
+    if (visible_world.width() > 3000) {
+      base_radius = 18.0;
+      cluster_distance = 120.0;
+      label_threshold = 999999.0; // Don't show labels when far
+    } else if (visible_world.width() > 1500) {
+      base_radius = 16.0;
+      cluster_distance = 40.0;
+      label_threshold = 2000.0;
+    } else {
+      base_radius = 14.0;
+      cluster_distance = 0.0;
+      label_threshold = 1200.0;
+    }
+    
+    // Track drawn POIs to prevent overlap
+    std::vector<std::pair<ezgl::point2d, double>> drawn_pois; // pos, radius
+    
+    // Count POIs by category for clustering
+    struct ClusterInfo {
+      ezgl::point2d center;
+      std::vector<int> poi_indices;
+      PoiCategory category;
+    };
+    std::vector<ClusterInfo> clusters;
+    std::vector<bool> poi_processed(Mypois.size(), false);
+    
+    // First pass: Create clusters
+    for (int i = 0; i < (int)Mypois.size(); i++) {
+      if (poi_processed[i]) continue;
+      if (!visible_world.contains(Mypois[i].x, Mypois[i].y)) continue;
+      
+      PoiCategory cat = classify_poi(getPOIType(i));
+      
+      // Start new cluster
+      ClusterInfo cluster;
+      cluster.center = {Mypois[i].x, Mypois[i].y};
+      cluster.poi_indices.push_back(i);
+      cluster.category = cat;
+      poi_processed[i] = true;
+      
+      // Find nearby POIs of same category
+      for (int j = i + 1; j < (int)Mypois.size(); j++) {
+        if (poi_processed[j]) continue;
+        
+        PoiCategory cat2 = classify_poi(getPOIType(j));
+        
+        // Only cluster same category
+        if (cat.label != cat2.label) continue;
+        
+        double dx = Mypois[j].x - Mypois[i].x;
+        double dy = Mypois[j].y - Mypois[i].y;
+        double dist = std::sqrt(dx * dx + dy * dy);
+        
+        if (dist < cluster_distance) {
+          cluster.poi_indices.push_back(j);
+          poi_processed[j] = true;
+          
+          // Update cluster center (average position)
+          double sum_x = 0, sum_y = 0;
+          for (int idx : cluster.poi_indices) {
+            sum_x += Mypois[idx].x;
+            sum_y += Mypois[idx].y;
+          }
+          cluster.center.x = sum_x / cluster.poi_indices.size();
+          cluster.center.y = sum_y / cluster.poi_indices.size();
         }
       }
+      
+      clusters.push_back(cluster);
     }
-  }
+    
+    // Second pass: Draw clusters
+    for (const auto& cluster : clusters) {
+      int count = cluster.poi_indices.size();
+
+      // When zoomed in tightly, skip clusters of size > 1 and draw individuals instead
+      // (they will each be their own cluster of 1 at this zoom level naturally,
+      //  but we reduce cluster_distance above — so this just draws every dot cleanly)
+
+      double radius = base_radius;
+      // No scaling by count — always same size dot
+
+      // Check overlap with already drawn
+      bool overlaps = false;
+      for (const auto& drawn : drawn_pois) {
+        double dx = cluster.center.x - drawn.first.x;
+        double dy = cluster.center.y - drawn.first.y;
+        double dist = std::sqrt(dx * dx + dy * dy);
+        if (dist < (radius + drawn.second + 10)) {
+          overlaps = true;
+          break;
+        }
+      }
+
+      if (overlaps) continue;
+
+      // Draw plain color dot — no count badge
+      g->set_color(cluster.category.color);
+      g->fill_arc(cluster.center, radius, 0, 360);
+
+      // White border
+      g->set_color(ezgl::WHITE);
+      g->set_line_width(2);
+      g->draw_arc(cluster.center, radius, 0, 360);
+
+      // Draw label when zoomed in close on individual POIs
+      if (visible_world.width() < label_threshold && count == 1) {
+        std::string name = Mypois[cluster.poi_indices[0]].name;
+        if (!name.empty() && name != "<unknown>") {
+          if (is_night_mode) g->set_color(ezgl::WHITE);
+          else g->set_color(ezgl::BLACK);
+          g->set_font_size(9);
+          g->draw_text({cluster.center.x, cluster.center.y + radius + 10}, name);
+        }
+      }
+
+      drawn_pois.push_back({cluster.center, radius});
+    }
 
     if (search_result_is_poi) {
     ezgl::point2d c = {search_result_x, search_result_y};
@@ -1141,7 +1347,8 @@ void draw_main_canvas(ezgl::renderer *g) {
     g->set_color(ezgl::color(255, 0, 255));
     g->set_line_width(3);
     g->draw_arc(c, 30, 0, 360);
-    }
+  }
+}
 }
 
 void drawMap() {

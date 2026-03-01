@@ -383,6 +383,265 @@
                       </object>
                     </child>
 
+                    <!-- Separator -->
+                    <child>
+                      <object class="GtkSeparator">
+                        <property name="visible">True</property>
+                        <property name="orientation">horizontal</property>
+                        <property name="margin-top">6</property>
+                        <property name="margin-bottom">10</property>
+                      </object>
+                    </child>
+
+                    <!-- ══════════════════════════════════════════════════ -->
+                    <!-- ── SECTION: POI LEGEND (NEW!) ─────────────────── -->
+                    <!-- ══════════════════════════════════════════════════ -->
+                    <child>
+                      <object class="GtkLabel">
+                        <property name="visible">True</property>
+                        <property name="can-focus">False</property>
+                        <property name="label">POI CATEGORIES</property>
+                        <property name="xalign">0</property>
+                        <property name="margin-bottom">8</property>
+                        <attributes>
+                          <attribute name="weight" value="bold"/>
+                          <attribute name="scale" value="0.75"/>
+                          <attribute name="foreground" value="#888888"/>
+                        </attributes>
+                      </object>
+                    </child>
+
+                    <!-- Legend items container -->
+                    <child>
+                      <object class="GtkBox">
+                        <property name="visible">True</property>
+                        <property name="orientation">vertical</property>
+                        <property name="spacing">4</property>
+                        <property name="margin-bottom">12</property>
+                        
+                        <!-- Food & Drink -->
+                        <child>
+                          <object class="GtkBox">
+                            <property name="visible">True</property>
+                            <property name="spacing">8</property>
+                            <child>
+                              <object class="GtkDrawingArea" id="LegendFood">
+                                <property name="visible">True</property>
+                                <property name="width-request">16</property>
+                                <property name="height-request">16</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkLabel">
+                                <property name="visible">True</property>
+                                <property name="label">Food &amp; Drink</property>
+                                <property name="xalign">0</property>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+
+                        <!-- Healthcare -->
+                        <child>
+                          <object class="GtkBox">
+                            <property name="visible">True</property>
+                            <property name="spacing">8</property>
+                            <child>
+                              <object class="GtkDrawingArea" id="LegendHealth">
+                                <property name="visible">True</property>
+                                <property name="width-request">16</property>
+                                <property name="height-request">16</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkLabel">
+                                <property name="visible">True</property>
+                                <property name="label">Healthcare</property>
+                                <property name="xalign">0</property>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+
+                        <!-- Education -->
+                        <child>
+                          <object class="GtkBox">
+                            <property name="visible">True</property>
+                            <property name="spacing">8</property>
+                            <child>
+                              <object class="GtkDrawingArea" id="LegendEducation">
+                                <property name="visible">True</property>
+                                <property name="width-request">16</property>
+                                <property name="height-request">16</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkLabel">
+                                <property name="visible">True</property>
+                                <property name="label">Education</property>
+                                <property name="xalign">0</property>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+
+                        <!-- Transport -->
+                        <child>
+                          <object class="GtkBox">
+                            <property name="visible">True</property>
+                            <property name="spacing">8</property>
+                            <child>
+                              <object class="GtkDrawingArea" id="LegendTransport">
+                                <property name="visible">True</property>
+                                <property name="width-request">16</property>
+                                <property name="height-request">16</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkLabel">
+                                <property name="visible">True</property>
+                                <property name="label">Transport</property>
+                                <property name="xalign">0</property>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+
+                        <!-- Finance -->
+                        <child>
+                          <object class="GtkBox">
+                            <property name="visible">True</property>
+                            <property name="spacing">8</property>
+                            <child>
+                              <object class="GtkDrawingArea" id="LegendFinance">
+                                <property name="visible">True</property>
+                                <property name="width-request">16</property>
+                                <property name="height-request">16</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkLabel">
+                                <property name="visible">True</property>
+                                <property name="label">Finance</property>
+                                <property name="xalign">0</property>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+
+                        <!-- Shopping -->
+                        <child>
+                          <object class="GtkBox">
+                            <property name="visible">True</property>
+                            <property name="spacing">8</property>
+                            <child>
+                              <object class="GtkDrawingArea" id="LegendShopping">
+                                <property name="visible">True</property>
+                                <property name="width-request">16</property>
+                                <property name="height-request">16</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkLabel">
+                                <property name="visible">True</property>
+                                <property name="label">Shopping</property>
+                                <property name="xalign">0</property>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+
+                        <!-- Accommodation -->
+                        <child>
+                          <object class="GtkBox">
+                            <property name="visible">True</property>
+                            <property name="spacing">8</property>
+                            <child>
+                              <object class="GtkDrawingArea" id="LegendAccommodation">
+                                <property name="visible">True</property>
+                                <property name="width-request">16</property>
+                                <property name="height-request">16</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkLabel">
+                                <property name="visible">True</property>
+                                <property name="label">Accommodation</property>
+                                <property name="xalign">0</property>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+
+                        <!-- Services -->
+                        <child>
+                          <object class="GtkBox">
+                            <property name="visible">True</property>
+                            <property name="spacing">8</property>
+                            <child>
+                              <object class="GtkDrawingArea" id="LegendServices">
+                                <property name="visible">True</property>
+                                <property name="width-request">16</property>
+                                <property name="height-request">16</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkLabel">
+                                <property name="visible">True</property>
+                                <property name="label">Services</property>
+                                <property name="xalign">0</property>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+
+                        <!-- Religion -->
+                        <child>
+                          <object class="GtkBox">
+                            <property name="visible">True</property>
+                            <property name="spacing">8</property>
+                            <child>
+                              <object class="GtkDrawingArea" id="LegendReligion">
+                                <property name="visible">True</property>
+                                <property name="width-request">16</property>
+                                <property name="height-request">16</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkLabel">
+                                <property name="visible">True</property>
+                                <property name="label">Religion</property>
+                                <property name="xalign">0</property>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+
+                        <!-- Emergency -->
+                        <child>
+                          <object class="GtkBox">
+                            <property name="visible">True</property>
+                            <property name="spacing">8</property>
+                            <child>
+                              <object class="GtkDrawingArea" id="LegendEmergency">
+                                <property name="visible">True</property>
+                                <property name="width-request">16</property>
+                                <property name="height-request">16</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkLabel">
+                                <property name="visible">True</property>
+                                <property name="label">Emergency</property>
+                                <property name="xalign">0</property>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+
+                      </object>
+                    </child>
+
                     <!-- Hidden ProceedButton kept for API compatibility -->
                     <child>
                       <object class="GtkButton" id="ProceedButton">
