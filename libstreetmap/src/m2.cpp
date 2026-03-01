@@ -96,6 +96,9 @@ static float search_result_y = -1;
 static bool search_result_is_poi = false;
 static bool search_just_selected = false;
 
+// Function declarations
+static PoiCategory classify_poi(const std::string& type);
+
 // Coordinate conversion declarations
 float xFromLon(float lon);
 float yFromLat(float lat);
@@ -105,6 +108,7 @@ void act_on_mouse_click(ezgl::application *app, GdkEventButton *event, double x,
 
 // Global for popup in finding interesctions
 static GtkWidget* active_find_dialog = nullptr;
+
 
 // ----------------------------------------------------------------------------
 // Coordinate Conversion Functions
@@ -500,6 +504,20 @@ static gboolean on_autocomplete_match_selected(GtkEntryCompletion*,
       search_result_y = cy;
     }
 
+    std::string raw_type = getPOIType(idx);
+    PoiCategory cat = classify_poi(raw_type);
+
+    std::stringstream ss;
+    ss << "POI: " << Mypois[idx].name
+       << " | Type: " << cat.label;
+
+    int nearest = findClosestIntersection(Mypois[idx].position);
+    if (nearest >= 0 && nearest < (int)intersections.size()) {
+      ss << " | Near: " << intersections[nearest].name;
+    }
+
+    app->update_message(ss.str());
+
     // ── TTS: announce POI (strip the "(near ...)" part for cleaner speech) 
     if (name) {
       std::string clean = Mypois[idx].name; // use raw POI name, no parenthetical
@@ -540,6 +558,24 @@ else if (type == 1) {
 }
 else if (type == 2) {
     ss << "INTERSECTION: " << (name ? name : "") << " (click intersection for details)";
+}
+
+if (type == 1) {
+    std::string raw_type = getPOIType(idx);
+    PoiCategory cat = classify_poi(raw_type);
+
+    std::stringstream ss2;
+    ss2 << "POI: " << Mypois[idx].name
+        << " | Type: " << cat.label;
+
+    int nearest = findClosestIntersection(Mypois[idx].position);
+    if (nearest >= 0 && nearest < (int)intersections.size()) {
+      ss2 << " | Near: " << intersections[nearest].name;
+    }
+
+    ss.str("");
+    ss.clear();
+    ss << ss2.str();
 }
 
 app->update_message(ss.str());
