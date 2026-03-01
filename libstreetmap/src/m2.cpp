@@ -1080,11 +1080,24 @@ void draw_main_canvas(ezgl::renderer *g) {
   }
   g->set_text_rotation(0);
 
-  g->set_color(ezgl::YELLOW);
-  for (int id : highlighted_intersections) {
-    ezgl::point2d center = {intersections[id].x, intersections[id].y};
-    g->fill_arc(center, 50, 0, 360);
-  }
+    for (int id : highlighted_intersections) {
+    ezgl::point2d c = {intersections[id].x, intersections[id].y};
+
+    if (!visible_world.contains(c)) continue;
+
+    // Magenta halo
+    g->set_color(ezgl::color(255, 0, 255, 60));
+    g->fill_arc(c, 70, 0, 360);
+
+    // White inner circle
+    g->set_color(ezgl::WHITE);
+    g->fill_arc(c, 25, 0, 360);
+
+    // Magenta ring
+    g->set_color(ezgl::color(255, 0, 255));
+    g->set_line_width(3);
+    g->draw_arc(c, 40, 0, 360);
+    }
 
   if (selected_intersection != -1) {
     ezgl::point2d center = {intersections[selected_intersection].x, intersections[selected_intersection].y};
@@ -1106,19 +1119,29 @@ void draw_main_canvas(ezgl::renderer *g) {
     }
   }
 
-  if (search_result_is_poi) {
-    g->set_color(ezgl::color(255, 0, 255));
-    g->fill_arc({search_result_x, search_result_y}, 100, 0, 360);
-    g->set_color(ezgl::WHITE);
-    g->fill_arc({search_result_x, search_result_y}, 35, 0, 360);
-  } else if (!search_result_is_poi && search_result_intersection >= 0) {
+    if (search_result_is_poi) {
+    ezgl::point2d c = {search_result_x, search_result_y};
+    g->set_color(ezgl::color(255, 0, 255, 80));  // soft halo
+    g->fill_arc(c, 60, 0, 360);
+    g->set_color(ezgl::WHITE);                  // inner
+    g->fill_arc(c, 20, 0, 360);
+    g->set_color(ezgl::color(255, 0, 255));     // ring
+    g->set_line_width(3);
+    g->draw_arc(c, 30, 0, 360);
+
+    } else if (!search_result_is_poi && search_result_intersection >= 0) {
+
     float sx = intersections[search_result_intersection].x;
     float sy = intersections[search_result_intersection].y;
-    g->set_color(ezgl::color(255, 0, 255));
-    g->fill_arc({sx, sy}, 100, 0, 360);
+    ezgl::point2d c = {sx, sy};
+    g->set_color(ezgl::color(255, 0, 255, 80));
+    g->fill_arc(c, 60, 0, 360);
     g->set_color(ezgl::WHITE);
-    g->fill_arc({sx, sy}, 35, 0, 360);
-  }
+    g->fill_arc(c, 20, 0, 360);
+    g->set_color(ezgl::color(255, 0, 255));
+    g->set_line_width(3);
+    g->draw_arc(c, 30, 0, 360);
+    }
 }
 
 void drawMap() {
