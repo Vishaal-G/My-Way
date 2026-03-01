@@ -578,6 +578,7 @@ void act_on_mouse_click(ezgl::application *app, GdkEventButton *, double x, doub
   search_result_x = -1;
   search_result_y = -1;
   search_result_is_poi = false;
+  highlighted_intersections.clear();
 
   LatLon clicked_pos(latFromY(y), lonFromX(x));
   selected_intersection = findClosestIntersection(clicked_pos);
