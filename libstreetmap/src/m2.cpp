@@ -811,70 +811,61 @@ static void zoom_out_button(GtkWidget*, gpointer data) {
 
 // Load map button handler
 void load_selected_map(GtkWidget*, gpointer data) {
-  auto* app = static_cast<ezgl::application*>(data);
+  auto *app = static_cast<ezgl::application *>(data);
 
-  GtkComboBoxText* combo = GTK_COMBO_BOX_TEXT(app->get_object("MapCombo"));
+  GtkComboBoxText *combo = GTK_COMBO_BOX_TEXT(app->get_object("MapCombo"));
   if (!combo) return;
 
   int active_idx = gtk_combo_box_get_active(GTK_COMBO_BOX(combo));
-  if (active_idx < 0 ||
-      active_idx >= static_cast<int>(discovered_map_paths.size()))
-    return;
+  if (active_idx < 0 || active_idx >= static_cast<int>(discovered_map_paths.size())) return;
 
   std::string new_map_path = discovered_map_paths[active_idx];
 
+  // 1. Close the current map (your m1.cpp closeMap handles the OSM DB too!)
   closeMap();
-  closeOSMDatabase();
 
+  // 2. Load the new map (your m1.cpp loadMap handles the OSM DB too!)
   bool load_success = loadMap(new_map_path);
 
-  std::string osm_path = new_map_path;
-  size_t pos = osm_path.find(".streets.bin");
-  if (pos != std::string::npos) {
-    osm_path.replace(pos, 12, ".osm.bin");
-  }
-  bool osm_success = loadOSMDatabaseBIN(osm_path);
-
-  if (!load_success || !osm_success) {
-    std::cerr << "Failed to load map or OSM data." << std::endl;
+  if (!load_success) {
+    std::cerr << "Failed to load map: " << new_map_path << std::endl;
     return;
   }
 
+  // 3. Extract the data into our vectors
   load_map_data();
   build_autocomplete_store();
 
-  GtkEntry* top_search = GTK_ENTRY(app->get_object("TopSearch"));
-  GtkEntry* e1 = GTK_ENTRY(app->get_object("Street1Entry"));
-  GtkEntry* e2 = GTK_ENTRY(app->get_object("Street2Entry"));
+  // 4. Update UI components
+  GtkEntry *top_search = GTK_ENTRY(app->get_object("TopSearch"));
+  GtkEntry *e1 = GTK_ENTRY(app->get_object("Street1Entry"));
+  GtkEntry *e2 = GTK_ENTRY(app->get_object("Street2Entry"));
 
   if (top_search) {
-    GtkEntryCompletion* c = gtk_entry_get_completion(top_search);
-    if (c)
-      gtk_entry_completion_set_model(c, GTK_TREE_MODEL(autocomplete_store));
+    GtkEntryCompletion *c = gtk_entry_get_completion(top_search);
+    if (c) gtk_entry_completion_set_model(c, GTK_TREE_MODEL(autocomplete_store));
   }
   if (e1) {
-    GtkEntryCompletion* c = gtk_entry_get_completion(e1);
-    if (c)
-      gtk_entry_completion_set_model(c, GTK_TREE_MODEL(autocomplete_store));
+    GtkEntryCompletion *c = gtk_entry_get_completion(e1);
+    if (c) gtk_entry_completion_set_model(c, GTK_TREE_MODEL(autocomplete_store));
   }
   if (e2) {
-    GtkEntryCompletion* c = gtk_entry_get_completion(e2);
-    if (c)
-      gtk_entry_completion_set_model(c, GTK_TREE_MODEL(autocomplete_store));
+    GtkEntryCompletion *c = gtk_entry_get_completion(e2);
+    if (c) gtk_entry_completion_set_model(c, GTK_TREE_MODEL(autocomplete_store));
   }
 
+  // 5. Reset camera boundaries
   ezgl::rectangle new_world({xFromLon(global_minLon), yFromLat(global_minLat)},
                             {xFromLon(global_maxLon), yFromLat(global_maxLat)});
   g_map_world = new_world;
 
-  ezgl::canvas* main_canvas = app->get_canvas("MainCanvas");
+  ezgl::canvas *main_canvas = app->get_canvas("MainCanvas");
   if (main_canvas) {
     main_canvas->get_camera().set_world(new_world);
   }
 
   app->refresh_drawing();
 }
-
 // Night mode toggle handler
 static void on_night_mode_toggled(GObject* object, GParamSpec*, gpointer data) {
   is_night_mode = gtk_switch_get_active(GTK_SWITCH(object));
@@ -1588,6 +1579,8 @@ void draw_main_canvas(ezgl::renderer *g) {
 
 // Main function to initialize and run the application
 void drawMap() {
+  // main.cpp has ALREADY called loadMap() for us, so the OSM database is open!
+  // We can safely extract the data immediately.
   load_map_data();
 
   ezgl::application::settings settings;
@@ -1599,7 +1592,8 @@ void drawMap() {
 
   ezgl::rectangle initial_world(
       {xFromLon(global_minLon), yFromLat(global_minLat)},
-      {xFromLon(global_maxLon), yFromLat(global_maxLat)});
+      {xFromLon(global_maxLon), yFromLat(global_maxLat)}
+  );
   g_map_world = initial_world;
 
   application.add_canvas("MainCanvas", draw_main_canvas, initial_world);
