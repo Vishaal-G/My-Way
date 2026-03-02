@@ -645,7 +645,7 @@
                     <!-- Hidden ProceedButton kept for API compatibility -->
                     <child>
                       <object class="GtkButton" id="ProceedButton">
-                        <property name="visible">False</property>
+                        <property name="visible">True</property>
                         <property name="can-focus">False</property>
                         <property name="label">Proceed</property>
                       </object>

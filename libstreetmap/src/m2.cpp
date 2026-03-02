@@ -27,58 +27,13 @@
 #include "ezgl/application.hpp"
 #include "ezgl/graphics.hpp"
 #include "m1.hpp"
-#include "m2.h"
+#include "m2.hpp"
 #include "tts.h"
 
-// Declarations
-void draw_main_canvas(ezgl::renderer* g);
+
 
 // Constants for projections
 double cos_lat_avg;
-
-// Data structures
-struct Intersection {
-  LatLon position;
-  std::string name;
-  float x;
-  float y;
-};
-
-struct MyPOI {
-  LatLon position;
-  std::string name;
-  float x;
-  float y;
-};
-
-struct streetSegments {
-  std::vector<ezgl::point2d> points;
-  float speedLimit;
-  std::string name;
-};
-
-struct MyFeature {
-  FeatureType type;
-  std::vector<ezgl::point2d> points;
-  bool is_closed;
-};
-
-struct PoiCategory {
-  ezgl::color color;
-  std::string label;
-};
-
-// Subway Data Structures
-struct SubwayLine {
-  std::string name;
-  ezgl::color color;
-  std::vector<std::vector<ezgl::point2d>> tracks;
-};
-
-struct SubwayStation {
-  std::string name;
-  ezgl::point2d position;
-};
 
 // Main Map Data (precomputed for drawing/UI)
 std::vector<MyFeature> features;
@@ -119,14 +74,7 @@ static GtkWidget* active_find_dialog = nullptr;
 // Helper Function declaration
 static PoiCategory classify_poi(const std::string& type);
 
-// Coordinate conversion declarations
-float xFromLon(float lon);
-float yFromLat(float lat);
-float lonFromX(float x);
-float latFromY(float y);
 
-void act_on_mouse_click(ezgl::application* app, GdkEventButton* event, double x,
-                        double y);
 
 // Coordinate Conversion Functions
 float xFromLon(float lon) {
@@ -999,7 +947,7 @@ void initial_setup(ezgl::application* app, bool) {
                      app);
   }
 
-  auto draw_legend_swatch = [](GtkWidget* widget, cairo_t* cr,
+  auto draw_legend_swatch = [](GtkWidget* /*widget*/, cairo_t* cr,
                                gpointer color_ptr) -> gboolean {
     ezgl::color* col = static_cast<ezgl::color*>(color_ptr);
     cairo_set_source_rgb(cr, col->red / 255.0, col->green / 255.0,
@@ -1221,10 +1169,8 @@ void draw_main_canvas(ezgl::renderer *g) {
       }
       arrow_counter++;
       
-      int seg_idx = pair.first;
       const streetSegments* seg = pair.second;
       
-      StreetSegmentInfo info = getStreetSegmentInfo(seg_idx);
       
       if (seg->points.size() < 2) continue;
       
