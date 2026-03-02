@@ -131,6 +131,8 @@ ezgl::color parse_hex_color(std::string hex_str) {
   return ezgl::color(0, 100, 200);
 }
 
+// Discover map files in the current directory and the provided maps directory,
+// and store their paths
 void discover_map_paths() {
   namespace fs = std::filesystem;
   std::set<std::string> unique_paths;
