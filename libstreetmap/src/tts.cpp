@@ -1,3 +1,31 @@
+/*
+ * tts.cpp
+ *
+ * This file implements simple text-to-speech (TTS) functionality for the
+ * our map application.
+ *
+ * The purpose of this file is to provide audio feedback to the
+ * user when certain actions occur (e.g., selecting a street, clicking an
+ * intersection, or performing a search).
+ *
+ * The implementation uses the external program 'spd-say' (Speech Dispatcher)
+ * and launches it as a detached background process so that it does not block
+ * the GTK main event loop.
+ *
+ * Main functionality provided:
+ *   - speak(text): speaks a given string asynchronously
+ *   - speak_cancel(): cancels any ongoing speech
+ *
+ * Internal helpers:
+ *   - shell_escape(): ensures text is safely passed to the shell
+ *   - log_tts(): writes debug information to /tmp/tts_debug.log
+ *
+ * Relationship to other files:
+ *   - tts.h declares the public interface used by m2.cpp
+ *   - m2.cpp calls speak() to provide audio feedback during user interaction
+ *
+ */
+
 #include "tts.h"
 #include <cstdlib>
 #include <cstdio>
@@ -7,10 +35,7 @@
 #include <fstream>
 #include <sstream>
 
-// ---------------------------------------------------------------------------
-// Internal helper: sanitize text so it is safe to pass to the shell.
-// We replace single quotes with a close-quote + escaped-quote + open-quote
-// ---------------------------------------------------------------------------
+// Internal helper: sanitize text so it is safe to pass to the shell
 static std::string shell_escape(const std::string& raw) {
     std::string out;
     out.reserve(raw.size() + 8);
@@ -24,9 +49,7 @@ static std::string shell_escape(const std::string& raw) {
     return out;
 }
 
-// ---------------------------------------------------------------------------
 // Internal helper: append a timestamped line to the debug log file.
-// ---------------------------------------------------------------------------
 static void log_tts(const std::string& text, const std::string& cmd) {
     std::ofstream log("/tmp/tts_debug.log", std::ios::app);
     if (!log.is_open()) return;
@@ -42,7 +65,6 @@ static void log_tts(const std::string& text, const std::string& cmd) {
     log << "---\n";
 }
 
-// ---------------------------------------------------------------------------
 // speak()
 //
 // Launches spd-say in the background (non-blocking) so it never stalls the
@@ -53,7 +75,6 @@ static void log_tts(const std::string& text, const std::string& cmd) {
 //   -w          wait until the speech finishes before exiting (handled by)
 //   -C          cancel any current speech first (avoid overlapping sentences)
 //   -r -10      speak slightly slower than default for clarity
-// ---------------------------------------------------------------------------
 void speak(const std::string& text) {
     if (text.empty()) return;
 
@@ -84,11 +105,9 @@ void speak(const std::string& text) {
     }
 }
 
-// ---------------------------------------------------------------------------
 // speak_cancel()
 // Sends a cancel-speech command without speaking any new text.
 // Useful if the user clicks rapidly and you want to cut off the previous speech immediately.
-// ---------------------------------------------------------------------------
 void speak_cancel() {
     // spd-say -C with an empty string just cancels current speech
     system("spd-say -C '' &");

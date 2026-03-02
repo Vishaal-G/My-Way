@@ -28,14 +28,10 @@ typedef void*                  gpointer;
 #include "ezgl/graphics.hpp"
 #include "m1.hpp"
 
-// -------------------------------------------------------
 // Constants
-// -------------------------------------------------------
 extern double cos_lat_avg;
 
-// -------------------------------------------------------
 // Structs
-// -------------------------------------------------------
 
 struct Intersection {
     LatLon position;
@@ -79,9 +75,7 @@ struct SubwayStation {
     ezgl::point2d position;
 };
 
-// -------------------------------------------------------
 // Global Data
-// -------------------------------------------------------
 extern std::vector<MyFeature> features;
 extern std::vector<streetSegments> streets;
 extern std::vector<MyPOI> Mypois;
@@ -95,41 +89,29 @@ extern std::unordered_map<OSMID, const OSMNode*> osm_nodes_map;
 
 extern double global_maxLat, global_minLat, global_maxLon, global_minLon;
 
-// -------------------------------------------------------
 // Coordinate Conversion
-// -------------------------------------------------------
 float xFromLon(float lon);
 float yFromLat(float lat);
 float lonFromX(float x);
 float latFromY(float y);
 
-// -------------------------------------------------------
 // Internal Helpers
-// -------------------------------------------------------
 bool ends_with(const std::string& text, const std::string& suffix);
 ezgl::color parse_hex_color(std::string hex_str);
 
-// -------------------------------------------------------
 // Map Loading
-// -------------------------------------------------------
 void discover_map_paths();
 void load_map_data();
 void build_autocomplete_store();
 
-// -------------------------------------------------------
 // Drawing
-// -------------------------------------------------------
 void draw_main_canvas(ezgl::renderer* g);
 ezgl::color get_feature_color(FeatureType type, bool night);
 
-// -------------------------------------------------------
 // UI / Event Handlers
-// -------------------------------------------------------
 void initial_setup(ezgl::application* app, bool new_window);
 void act_on_mouse_click(ezgl::application* app, GdkEventButton* event, double x, double y);
 void load_selected_map(GtkWidget* widget, gpointer data);
 
-// -------------------------------------------------------
 // Entry Point
-// -------------------------------------------------------
 void drawMap();

@@ -1,5 +1,35 @@
 /* * Copyright 2026 University of Toronto ... (Header omitted for brevity) */
 
+/*
+ * m2.cpp
+ *
+ * This file implements the graphical user interface and visualization logic
+ * for our ECE297 mapping application.
+ *
+ * The purpose of this file is to connect the backend map data and functions
+ * (from Milestone 1) with a fully-interactive graphical interface using
+ * the ezgl graphics library.
+ *
+ * Main responsibilities of this file include:
+ *  - Rendering map features (streets, intersections, POIs, features)
+ *  - Handling mouse clicks and user interaction
+ *  - Implementing street, POI, and intersection search with autocomplete
+ *  - Implementing the "Find Intersections" button feature between two streets
+ *  - Highlighting intersections and search results
+ *  - Displaying additional information in the message bar
+ *  - Supporting night mode visualization
+ *  - Rendering subway lines and stations from OSM data
+ *  - Managing UI elements such as buttons, dialogs, and popups
+ *  - Loading maps of other cities 
+ *
+ * This file relies on:
+ *  - m1.hpp and m1.cpp for map query functions and data access
+ *  - ezgl for rendering and UI management
+ *  - m2.hpp for declarations related to Milestone 2
+ *  - tts.h for text-to-speech functionality
+ *
+ */
+
 #include <gtk/gtk.h>
 
 #include <algorithm>
