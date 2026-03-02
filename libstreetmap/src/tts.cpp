@@ -10,7 +10,6 @@
 // ---------------------------------------------------------------------------
 // Internal helper: sanitize text so it is safe to pass to the shell.
 // We replace single quotes with a close-quote + escaped-quote + open-quote
-// idiom so the shell doesn't misinterpret them.
 // ---------------------------------------------------------------------------
 static std::string shell_escape(const std::string& raw) {
     std::string out;
@@ -51,11 +50,9 @@ static void log_tts(const std::string& text, const std::string& cmd) {
 // process immediately.
 //
 // spd-say flags used:
-//   -w          wait until the utterance finishes before exiting (handled by
-//               the child process, not us — we are already detached)
+//   -w          wait until the speech finishes before exiting (handled by)
 //   -C          cancel any current speech first (avoid overlapping sentences)
-//   -r -10      speak slightly slower than default for clarity (optional;
-//               remove if you prefer the default rate)
+//   -r -10      speak slightly slower than default for clarity
 // ---------------------------------------------------------------------------
 void speak(const std::string& text) {
     if (text.empty()) return;
@@ -63,9 +60,9 @@ void speak(const std::string& text) {
     std::string safe = shell_escape(text);
 
     // Build the command:
-    //   spd-say -C  →  cancel previous utterance first
-    //   spd-say -w  →  wait (inside the child) so spd-say doesn't get killed
-    //   &           →  run in background so we don't block GTK
+    //   spd-say -C  = cancel previous utterance first
+    //   spd-say -w  = wait (inside the child) so spd-say doesn't get turned off
+    //   &           = run in background so we don't block GTK
     std::ostringstream cmd;
     cmd << "spd-say -C -w '" << safe << "' &";
 
@@ -74,7 +71,6 @@ void speak(const std::string& text) {
     // Debug log — always written regardless of audio hardware
     log_tts(text, cmd_str);
 
-    // Fire and forget
     int ret = system(cmd_str.c_str());
 
     // Log the return value of system() for extra debugging
@@ -90,10 +86,8 @@ void speak(const std::string& text) {
 
 // ---------------------------------------------------------------------------
 // speak_cancel()
-//
 // Sends a cancel-speech command without speaking any new text.
-// Useful if the user clicks rapidly and you want to cut off the previous
-// utterance immediately.
+// Useful if the user clicks rapidly and you want to cut off the previous speech immediately.
 // ---------------------------------------------------------------------------
 void speak_cancel() {
     // spd-say -C with an empty string just cancels current speech
