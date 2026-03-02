@@ -176,7 +176,9 @@ void discover_map_paths() {
             });
 }
 
-void load_map_data() {
+
+ void load_map_data() {
+  //For highlighted intersections 
   selected_intersection = -1;
   highlighted_intersections.clear();
 
@@ -188,6 +190,7 @@ void load_map_data() {
 
   if (getNumIntersections() == 0) return;
 
+  //To draw intersections 
   global_maxLat = getIntersectionPosition(0).latitude();
   global_minLat = global_maxLat;
   global_maxLon = getIntersectionPosition(0).longitude();
@@ -212,11 +215,13 @@ void load_map_data() {
   double avgLat = ((global_maxLat + global_minLat) / 2.0) * kDegreeToRadian;
   cos_lat_avg = cos(avgLat);
 
+  //Project Lat and Lon for intersection 
   for (int i = 0; i < getNumIntersections(); ++i) {
     intersections[i].x = xFromLon(intersections[i].position.longitude());
     intersections[i].y = yFromLat(intersections[i].position.latitude());
   }
 
+  //Iterate through all the streets segments and get their from to and curve points to draw 
   streets.clear();
   int numSegments = getNumStreetSegments();
   streets.resize(numSegments);
@@ -240,6 +245,7 @@ void load_map_data() {
         {xFromLon(toPos.longitude()), yFromLat(toPos.latitude())});
   }
 
+  //Load all POIs to draw 
   Mypois.clear();
   int numPOIs = getNumPointsOfInterest();
   Mypois.resize(numPOIs);
@@ -250,6 +256,7 @@ void load_map_data() {
     Mypois[i].y = yFromLat(Mypois[i].position.latitude());
   }
 
+  //Load all features 
   features.clear();
   int numFeatures = getNumFeatures();
   for (int i = 0; i < numFeatures; i++) {
@@ -272,9 +279,7 @@ void load_map_data() {
     features.push_back(feat);
   }
 
-  // ---------------------------------------------------
   // Load Subway Lines from OSM
-  // ---------------------------------------------------
   subway_lines.clear();
   osm_nodes_map.clear();
   osm_ways_map.clear();
@@ -295,7 +300,10 @@ void load_map_data() {
     std::string name = "Unknown Line";
     std::string hex_color = "";
 
+    //Tag count is the number of attributes the subway has 
     int tagCount = getTagCount(rel);
+    
+    //Checks the OSM to see if relation it is subway 
     for (int j = 0; j < tagCount; ++j) {
       std::pair<std::string, std::string> tag = getTagPair(rel, j);
 
@@ -307,15 +315,17 @@ void load_map_data() {
     if (is_subway) {
       SubwayLine line;
       line.name = name;
-      line.color = parse_hex_color(hex_color);
+      line.color = parse_hex_color(hex_color); //Calls parse_hex_color to get the colour of the subway line 
 
       std::vector<TypedOSMID> members = getRelationMembers(rel);
       std::vector<std::string> roles = getRelationMemberRoles(rel);
 
+      //Iterate through all parts (members) of the subway relation
       for (size_t k = 0; k < members.size(); ++k) {
         const auto& member = members[k];
         const std::string& role = roles[k];
 
+        //If the member is a Way, extract coordinate points to draw the physical tracks
         if (member.type() == TypedOSMID::Way) {
           auto way_it = osm_ways_map.find(member);
           if (way_it != osm_ways_map.end()) {
@@ -337,6 +347,8 @@ void load_map_data() {
               line.tracks.push_back(track_points);
             }
           }
+        
+        //If the member is a Node, check if it's a station/platform and save its position
         } else if (member.type() == TypedOSMID::Node) {
           if (role == "stop" || role == "station" || role == "platform") {
             auto node_it = osm_nodes_map.find(member);
@@ -362,6 +374,7 @@ void load_map_data() {
     }
   }
 
+  //Set the global map bounding box using the min/max coordinates calculated earlier
   g_map_world =
       ezgl::rectangle({xFromLon(global_minLon), yFromLat(global_minLat)},
                       {xFromLon(global_maxLon), yFromLat(global_maxLat)});
