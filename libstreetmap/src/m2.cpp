@@ -1,4 +1,17 @@
-/* * Copyright 2026 University of Toronto ... (Header omitted for brevity) */
+/*
+ * Copyright 2026 University of Toronto
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * with the Software in accordance with the terms of the ECE297 course.
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+ */
 
 /*
  * m2.cpp
@@ -1123,14 +1136,18 @@ static PoiCategory classify_poi(const std::string& type) {
   return {ezgl::color(120, 120, 120), "Other"};
 }
 
+
 void draw_main_canvas(ezgl::renderer *g) {
+//Get what part of the map is on the screen 
   ezgl::rectangle visible_world = g->get_visible_world();
 
+//Night mode 
   if (is_night_mode) g->set_color(30, 30, 30);
   else g->set_color(240, 240, 240);
   
   g->fill_rectangle(visible_world);
 
+//Colour in the features and choose map 
   for (const auto &feat : features) {
     g->set_color(get_feature_color(feat.type, is_night_mode));
     if (feat.is_closed && feat.points.size() > 2) {
@@ -1145,8 +1162,10 @@ void draw_main_canvas(ezgl::renderer *g) {
 
   double current_zoom_width = visible_world.width();
   
+  //Stores one way segments 
   std::vector<std::pair<StreetSegmentIdx, const streetSegments*>> oneway_segments;
   
+  //Draws the streets colours and width 
   for (int idx = 0; idx < (int)streets.size(); ++idx) {
     const auto &seg = streets[idx];
     float speed_kmh = seg.speedLimit * 3.6f;
@@ -1173,6 +1192,7 @@ void draw_main_canvas(ezgl::renderer *g) {
     }
   }
 
+//Arrows for one way 
   if (current_zoom_width < 8000) {
     std::vector<ezgl::point2d> arrow_positions;
     const double MIN_ARROW_DISTANCE = 120.0;
@@ -1304,6 +1324,7 @@ void draw_main_canvas(ezgl::renderer *g) {
     }
   }
 
+//For subway lines 
   if (current_zoom_width < 25000) { 
       g->set_line_width(4); 
       
