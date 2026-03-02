@@ -87,7 +87,7 @@ application::application(application::settings s)
     , m_window_id(s.window_identifier)
     , m_canvas_id(s.canvas_identifier)
     , m_application_id(s.application_identifier)
-    , m_application(gtk_application_new(s.application_identifier.c_str(), G_APPLICATION_FLAGS_NONE))
+    , m_application(gtk_application_new(s.application_identifier.c_str(), G_APPLICATION_DEFAULT_FLAGS))
     , m_builder(gtk_builder_new())
     , m_register_callbacks(s.setup_callbacks)
 {
@@ -206,7 +206,7 @@ int application::run(setup_callback_fn initial_setup_user_callback,
     g_object_unref(m_builder);
 
     // Reconstruct the GTK application
-    m_application = (gtk_application_new(m_application_id.c_str(), G_APPLICATION_FLAGS_NONE));
+    m_application = (gtk_application_new(m_application_id.c_str(), G_APPLICATION_DEFAULT_FLAGS));
     m_builder = (gtk_builder_new());
     g_signal_connect(m_application, "startup", G_CALLBACK(startup), this);
     g_signal_connect(m_application, "activate", G_CALLBACK(activate), this);
