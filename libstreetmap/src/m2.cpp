@@ -162,6 +162,7 @@ ezgl::color parse_hex_color(std::string hex_str) {
 
 // Discover map files in the current directory and the provided maps directory,
 // and store their paths
+//Provides the list of map files in alphabetical order 
 void discover_map_paths() {
   namespace fs = std::filesystem;
   std::set<std::string> unique_paths;
@@ -898,18 +899,20 @@ static void zoom_out_button(GtkWidget*, gpointer data) {
 void load_selected_map(GtkWidget*, gpointer data) {
   auto *app = static_cast<ezgl::application *>(data);
 
+  //Makes app search the UI file for MapCombo widget 
   GtkComboBoxText *combo = GTK_COMBO_BOX_TEXT(app->get_object("MapCombo"));
   if (!combo) return;
-
+  //Gets index that the user selected 
   int active_idx = gtk_combo_box_get_active(GTK_COMBO_BOX(combo));
   if (active_idx < 0 || active_idx >= static_cast<int>(discovered_map_paths.size())) return;
 
+  //Get the new map to draw based on the map index 
   std::string new_map_path = discovered_map_paths[active_idx];
 
-  // 1. Close the current map (your m1.cpp closeMap handles the OSM DB too!)
+  //Close the current map 
   closeMap();
 
-  // 2. Load the new map (your m1.cpp loadMap handles the OSM DB too!)
+  //Load the new map 
   bool load_success = loadMap(new_map_path);
 
   if (!load_success) {
@@ -917,11 +920,12 @@ void load_selected_map(GtkWidget*, gpointer data) {
     return;
   }
 
-  // 3. Extract the data into our vectors
+  //Extract the data into our vectors
   load_map_data();
   build_autocomplete_store();
 
-  // 4. Update UI components
+  //Update UI components
+  //Updates the autocomplete data to the search functions 
   GtkEntry *top_search = GTK_ENTRY(app->get_object("TopSearch"));
   GtkEntry *e1 = GTK_ENTRY(app->get_object("Street1Entry"));
   GtkEntry *e2 = GTK_ENTRY(app->get_object("Street2Entry"));
@@ -939,7 +943,7 @@ void load_selected_map(GtkWidget*, gpointer data) {
     if (c) gtk_entry_completion_set_model(c, GTK_TREE_MODEL(autocomplete_store));
   }
 
-  // 5. Reset camera boundaries
+  //Reset camera boundaries
   ezgl::rectangle new_world({xFromLon(global_minLon), yFromLat(global_minLat)},
                             {xFromLon(global_maxLon), yFromLat(global_maxLat)});
   g_map_world = new_world;
@@ -951,6 +955,7 @@ void load_selected_map(GtkWidget*, gpointer data) {
 
   app->refresh_drawing();
 }
+
 // Night mode toggle handler
 static void on_night_mode_toggled(GObject* object, GParamSpec*, gpointer data) {
   is_night_mode = gtk_switch_get_active(GTK_SWITCH(object));
@@ -977,6 +982,7 @@ void initial_setup(ezgl::application* app, bool) {
   GtkWidget* night_switch = GTK_WIDGET(app->get_object("NightModeSwitch"));
   if (night_switch) {
     gtk_switch_set_active(GTK_SWITCH(night_switch), is_night_mode);
+    //Call on_night_mode_toggled when the switch is toggled 
     g_signal_connect(night_switch, "notify::active",
                      G_CALLBACK(on_night_mode_toggled), app);
   }
@@ -1170,7 +1176,7 @@ void draw_main_canvas(ezgl::renderer *g) {
 //Get what part of the map is on the screen 
   ezgl::rectangle visible_world = g->get_visible_world();
 
-//Night mode 
+//Night mode colours 
   if (is_night_mode) g->set_color(30, 30, 30);
   else g->set_color(240, 240, 240);
   
@@ -1180,11 +1186,11 @@ void draw_main_canvas(ezgl::renderer *g) {
   for (const auto &feat : features) {
     g->set_color(get_feature_color(feat.type, is_night_mode));
     if (feat.is_closed && feat.points.size() > 2) {
-      g->fill_poly(feat.points);
+      g->fill_poly(feat.points); //Closed feature 
     } else {
       g->set_line_width(1);
       for (size_t i = 0; i < feat.points.size() - 1; i++) {
-        g->draw_line(feat.points[i], feat.points[i + 1]);
+        g->draw_line(feat.points[i], feat.points[i + 1]);//Open features 
       }
     }
   }
@@ -1198,6 +1204,7 @@ void draw_main_canvas(ezgl::renderer *g) {
   for (int idx = 0; idx < (int)streets.size(); ++idx) {
     const auto &seg = streets[idx];
     float speed_kmh = seg.speedLimit * 3.6f;
+    //If statements used to control the zoom level 
     if (current_zoom_width > 15000 && speed_kmh <= 50) continue;
     if (current_zoom_width > 5000 && speed_kmh <= 30) continue;
 
@@ -1210,11 +1217,11 @@ void draw_main_canvas(ezgl::renderer *g) {
       else if (speed_kmh >= 60) { g->set_color(ezgl::YELLOW); g->set_line_width(2); }
       else { g->set_color(250, 250, 250); g->set_line_width(3); }
     }
-
+    //Draw street segment lines 
     for (size_t i = 0; i < seg.points.size() - 1; i++) {
       g->draw_line(seg.points[i], seg.points[i + 1]);
     }
-    
+    //Store the one way streets 
     StreetSegmentInfo info = getStreetSegmentInfo(idx);
     if (info.oneWay && speed_kmh < 80) {
       oneway_segments.push_back({idx, &seg});
@@ -1356,18 +1363,19 @@ void draw_main_canvas(ezgl::renderer *g) {
 //For subway lines 
   if (current_zoom_width < 100000) { 
       g->set_line_width(4); 
-      
+      //Goes through each subway line 
       for (const auto& line : subway_lines) {
           g->set_color(line.color);
-          
+          //Go through the track segments 
           for (const auto& track : line.tracks) {
+            //Go through the nodes of the track 
               for (size_t i = 0; i < track.size() - 1; ++i) {
                   g->draw_line(track[i], track[i + 1]);
               }
           }
       }
   }
-  
+  //Draw the circles for the subway stations 
   if (current_zoom_width < 15000) { 
       for (const auto& station : subway_stations) {
           g->set_color(ezgl::WHITE);
@@ -1668,6 +1676,59 @@ void draw_main_canvas(ezgl::renderer *g) {
     g->set_line_width(3);
     g->draw_arc(c, 30, 0, 360);
   }
+
+  //Get the dimensions of the map that is being drawn on the screen  
+  double screen_width_meters = visible_world.width();
+  double screen_height_meters = visible_world.height();
+
+  //Determine the scale of the bar, make it 15% 
+  double ideal_scale = screen_width_meters * 0.15; 
+  double scale_val; 
+
+  //Describe the increments of the scale
+  if (ideal_scale > 10000) scale_val = 10000;      // 10 km
+  else if (ideal_scale > 5000) scale_val = 5000;   // 5 km
+  else if (ideal_scale > 2000) scale_val = 2000;   // 2 km
+  else if (ideal_scale > 1000) scale_val = 1000;   // 1 km
+  else if (ideal_scale > 500) scale_val = 500;     // 500 m
+  else if (ideal_scale > 100) scale_val = 100;     // 100 m
+  else if (ideal_scale > 50) scale_val = 50;       // 50 m
+  else scale_val = 10;                             // 10 m
+
+  //pad_x and pad_y store the 
+  //The distance between right edge of screen to end of scale bar 
+  double pad_x = screen_width_meters * 0.05; 
+  //The distance bottom of screen to edge of scale bar 
+  double pad_y = screen_height_meters * 0.05;
+
+  //Find the boundaries of the current camera view
+  double right_edge = visible_world.center_x() + (screen_width_meters / 2.0);
+  double bottom_edge = visible_world.center_y() - (screen_height_meters / 2.0);
+
+  double start_x = right_edge - pad_x - scale_val;
+  double end_x = right_edge - pad_x;
+  double y_pos = bottom_edge + pad_y;
+
+  //Draw the horizontal line of the scale  
+  if (is_night_mode) g->set_color(ezgl::WHITE);
+  else g->set_color(ezgl::BLACK);
+
+  g->set_line_width(3);
+  g->draw_line({start_x, y_pos}, {end_x, y_pos});
+
+  //Draw the vertical lines 
+  double tick_height = screen_height_meters * 0.01;//Tick height is the percentage of the screens height
+  g->draw_line({start_x, y_pos - tick_height}, {start_x, y_pos + tick_height});
+  g->draw_line({end_x, y_pos - tick_height}, {end_x, y_pos + tick_height});
+
+  //Write the text label above the bar, based on km or m 
+  std::string scale_text = (scale_val >= 1000) ? 
+                          std::to_string((int)(scale_val / 1000)) + " km" : 
+                          std::to_string((int)scale_val) + " m";
+                          
+  g->set_font_size(10);
+  // Shift the text slightly up (positive Y) so it floats above the line
+  g->draw_text({(start_x + end_x) / 2.0, y_pos + (tick_height * 2.5)}, scale_text);
 }  
 
 // Main function to initialize and run the application
