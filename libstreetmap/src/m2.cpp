@@ -127,20 +127,36 @@ bool ends_with(const std::string& text, const std::string& suffix) {
 
 static bool is_night_mode = false;
 
+//Returns the colour that the subway lines should be 
 ezgl::color parse_hex_color(std::string hex_str) {
   if (hex_str.empty()) return ezgl::color(0, 100, 200);
+
+  //If given text for colour rather than hexcode 
+  if (hex_str == "green") return ezgl::color(0, 150, 50, 200); 
+  if (hex_str == "yellow") return ezgl::color(250, 210, 0, 200);
+  if (hex_str == "purple") return ezgl::color(150, 0, 150, 200); 
+  if (hex_str == "orange") return ezgl::color(255, 140, 0, 200);
+  if (hex_str == "red") return ezgl::color(230, 30, 30, 200);
+  if (hex_str == "blue") return ezgl::color(0, 100, 250, 200);
+  if (hex_str == "mediumorchid") return ezgl::color(186, 85, 211, 200);
+
+  //Get rid of the # 
   if (hex_str[0] == '#') hex_str = hex_str.substr(1);
 
+  //For hex codes 
   if (hex_str.length() == 6) {
     try {
       unsigned long val = std::stoul(hex_str, nullptr, 16);
-      uint8_t r = (val >> 16) & 0xFF;
-      uint8_t g = (val >> 8) & 0xFF;
+      uint8_t r = (val >> 16) & 0xFF;//Shift 16 bits 
+      uint8_t g = (val >> 8) & 0xFF; //Shift 8 bits 
       uint8_t b = val & 0xFF;
       return ezgl::color(r, g, b, 200);
     } catch (...) {
+      //If any crashes 
     }
   }
+  
+  //Default blue 
   return ezgl::color(0, 100, 200);
 }
 
@@ -192,7 +208,7 @@ void discover_map_paths() {
 }
 
 
- void load_map_data() {
+void load_map_data() {
   //For highlighted intersections 
   selected_intersection = -1;
   highlighted_intersections.clear();
@@ -211,6 +227,7 @@ void discover_map_paths() {
   global_maxLon = getIntersectionPosition(0).longitude();
   global_minLon = global_maxLon;
 
+  //Get the boundaries of the city to draw 
   intersections.clear();
   intersections.resize(getNumIntersections());
   for (int i = 0; i < getNumIntersections(); ++i) {
@@ -230,7 +247,8 @@ void discover_map_paths() {
   double avgLat = ((global_maxLat + global_minLat) / 2.0) * kDegreeToRadian;
   cos_lat_avg = cos(avgLat);
 
-  //Project Lat and Lon for intersection 
+  //Project Lat and Lon for intersection
+  //Iterate through each intersection  
   for (int i = 0; i < getNumIntersections(); ++i) {
     intersections[i].x = xFromLon(intersections[i].position.longitude());
     intersections[i].y = yFromLat(intersections[i].position.latitude());
@@ -241,20 +259,21 @@ void discover_map_paths() {
   int numSegments = getNumStreetSegments();
   streets.resize(numSegments);
   for (int i = 0; i < numSegments; i++) {
-    StreetSegmentInfo info = getStreetSegmentInfo(i);
+    StreetSegmentInfo info = getStreetSegmentInfo(i);//Gets the information about the street 
     streets[i].speedLimit = info.speedLimit;
     streets[i].name = getStreetName(info.streetID);
-
+    //Gets the position of the "from" of the street 
     LatLon fromPos = getIntersectionPosition(info.from);
     streets[i].points.push_back(
         {xFromLon(fromPos.longitude()), yFromLat(fromPos.latitude())});
 
+    //Goes through each curve position of the street so the drawing also draws the curves 
     for (int j = 0; j < info.numCurvePoints; j++) {
       LatLon curvePos = getStreetSegmentCurvePoint(i, j);
       streets[i].points.push_back(
           {xFromLon(curvePos.longitude()), yFromLat(curvePos.latitude())});
     }
-
+    //Gets the "to" of the street 
     LatLon toPos = getIntersectionPosition(info.to);
     streets[i].points.push_back(
         {xFromLon(toPos.longitude()), yFromLat(toPos.latitude())});
@@ -275,18 +294,20 @@ void discover_map_paths() {
   features.clear();
   int numFeatures = getNumFeatures();
   for (int i = 0; i < numFeatures; i++) {
+    //Identifies the feature 
     MyFeature feat;
     FeatureType type = getFeatureType(i);
 
     feat.type = type;
-
+    //Iterating through the points that make up the feature's boundaries 
     int numPoints = getNumFeaturePoints(i);
     for (int j = 0; j < numPoints; j++) {
       LatLon pos = getFeaturePoint(i, j);
       feat.points.push_back(
           {xFromLon(pos.longitude()), yFromLat(pos.latitude())});
     }
-
+    //Checks if the feature is closed
+    //Use g->fill if closed, or g->drawline if not closed 
     feat.is_closed = (feat.points.size() > 2 &&
                       feat.points.front().x == feat.points.back().x &&
                       feat.points.front().y == feat.points.back().y);
@@ -299,15 +320,17 @@ void discover_map_paths() {
   osm_nodes_map.clear();
   osm_ways_map.clear();
 
+  //Store all nodes of the OSM 
   for (int i = 0; i < getNumberOfNodes(); ++i) {
     const OSMNode* node = getNodeByIndex(i);
     osm_nodes_map[node->id()] = node;
   }
+  //Store all ways of the OSM 
   for (int i = 0; i < getNumberOfWays(); ++i) {
     const OSMWay* way = getWayByIndex(i);
     osm_ways_map[way->id()] = way;
   }
-
+  //Subways are "relations"
   for (int i = 0; i < getNumberOfRelations(); ++i) {
     const OSMRelation* rel = getRelationByIndex(i);
 
@@ -325,33 +348,37 @@ void discover_map_paths() {
       if (tag.first == "route" && tag.second == "subway") is_subway = true;
       if (tag.first == "name") name = tag.second;
       if (tag.first == "colour") hex_color = tag.second;
+      
     }
-
+    //If the relation is a subway 
     if (is_subway) {
       SubwayLine line;
       line.name = name;
       line.color = parse_hex_color(hex_color); //Calls parse_hex_color to get the colour of the subway line 
 
       std::vector<TypedOSMID> members = getRelationMembers(rel);
-      std::vector<std::string> roles = getRelationMemberRoles(rel);
+      std::vector<std::string> roles = getRelationMemberRoles(rel); //role is the role of the subway (stop, station, platform)
 
       //Iterate through all parts (members) of the subway relation
       for (size_t k = 0; k < members.size(); ++k) {
         const auto& member = members[k];
         const std::string& role = roles[k];
 
+        //If the member is a Way, it is a line 
         //If the member is a Way, extract coordinate points to draw the physical tracks
         if (member.type() == TypedOSMID::Way) {
-          auto way_it = osm_ways_map.find(member);
+          auto way_it = osm_ways_map.find(member);//Find the way in the hashmap 
           if (way_it != osm_ways_map.end()) {
             const OSMWay* way = way_it->second;
+            //Stores all the track points of the subway to draw 
             std::vector<ezgl::point2d> track_points;
 
             const std::vector<OSMID>& nds = getWayMembers(way);
-
+            //Go through every node in the way 
             for (OSMID nd_id : nds) {
               auto node_it = osm_nodes_map.find(nd_id);
               if (node_it != osm_nodes_map.end()) {
+                //Store the track points of the way 
                 LatLon ll = getNodeCoords(node_it->second);
                 track_points.push_back(
                     {xFromLon(ll.longitude()), yFromLat(ll.latitude())});
@@ -380,7 +407,7 @@ void discover_map_paths() {
               SubwayStation st;
               st.name = station_name;
               st.position = {xFromLon(ll.longitude()), yFromLat(ll.latitude())};
-              subway_stations.push_back(st);
+              subway_stations.push_back(st);//Store the subway stations 
             }
           }
         }
@@ -1327,7 +1354,7 @@ void draw_main_canvas(ezgl::renderer *g) {
   }
 
 //For subway lines 
-  if (current_zoom_width < 25000) { 
+  if (current_zoom_width < 100000) { 
       g->set_line_width(4); 
       
       for (const auto& line : subway_lines) {
@@ -1645,8 +1672,7 @@ void draw_main_canvas(ezgl::renderer *g) {
 
 // Main function to initialize and run the application
 void drawMap() {
-  // main.cpp has ALREADY called loadMap() for us, so the OSM database is open!
-  // We can safely extract the data immediately.
+  
   load_map_data();
 
   ezgl::application::settings settings;

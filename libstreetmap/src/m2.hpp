@@ -12,6 +12,8 @@
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
  */
+
+
 #pragma once
 
 // Forward declare GTK types so this header compiles without GTK on the include path.
