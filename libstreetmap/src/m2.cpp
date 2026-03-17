@@ -180,17 +180,9 @@ void discover_map_paths() {
         it.increment(ec);
         continue;
       }
-      if (it.depth() > max_depth) {
+      if (it.depth() > max_depth) {autocomplete
         it.disable_recursion_pending();
-        it.increment(ec);
-        continue;
-      }
-      if (it->is_regular_file(ec)) {
-        std::string file_name = it->path().filename().string();
-        if (ends_with(file_name, ".streets.bin")) {
-          std::string normalized = it->path().lexically_normal().string();
-          if (unique_paths.insert(normalized).second) {
-            discovered_map_paths.push_back(normalized);
+        it.increment(ec);autocomplete(normalized);
           }
         }
       }
