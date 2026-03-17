@@ -162,7 +162,7 @@ ezgl::color parse_hex_color(std::string hex_str) {
 
 // Discover map files in the current directory and the provided maps directory,
 // and store their paths
-//Provides the list of map files in alphabetical order 
+// Provides the list of map files in alphabetical order 
 void discover_map_paths() {
   namespace fs = std::filesystem;
   std::set<std::string> unique_paths;
@@ -180,10 +180,15 @@ void discover_map_paths() {
         it.increment(ec);
         continue;
       }
-      if (it.depth() > max_depth) {autocomplete
+      if (it.depth() > max_depth) {
         it.disable_recursion_pending();
-        it.increment(ec);autocomplete(normalized);
-          }
+        it.increment(ec);
+        continue;
+      }
+      if (it->is_regular_file(ec) && !ec) {
+        std::string path_str = it->path().string();
+        if (ends_with(path_str, ".streets.bin")) {
+          unique_paths.insert(path_str);
         }
       }
       it.increment(ec);
@@ -193,6 +198,8 @@ void discover_map_paths() {
   add_maps_under(fs::path("."), 4);
   add_maps_under(fs::path("/cad2/ece297s/public/maps"), 2);
 
+  discovered_map_paths.assign(unique_paths.begin(), unique_paths.end());
+  
   std::sort(discovered_map_paths.begin(), discovered_map_paths.end(),
             [](const std::string& a, const std::string& b) {
               return std::filesystem::path(a).filename().string() <

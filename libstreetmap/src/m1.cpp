@@ -1,4 +1,5 @@
 #include "m1.hpp"
+#include "m3.hpp"
 
 std::string cleanName(std::string name){
     std::string cleaned; 
@@ -230,6 +231,8 @@ bool loadMap(std::string map_streets_database_filename) {
         double speed_mps = info.speedLimit;           
         streetseg_travel_time[seg] = length_m / speed_mps; // Precompute and store travel times for every street segment
     }
+
+        initializePathfinding();
         load_successful = true; //Make sure this is updated to reflect whether
                                 //loading the map succeeded or failed
         return load_successful;
@@ -254,6 +257,7 @@ void closeMap() {
     }
     intersectionsGrid.clear(); 
 
+    cleanupPathfinding();
     if(osm_loaded){
         OSMWayFromID.clear(); 
         LatLonFromOSMID.clear(); 
