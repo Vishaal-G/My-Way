@@ -62,6 +62,11 @@
 #include "tts.h"
 
 
+// Global UI State Variables
+IntersectionIdx start_intersection_id = -1;
+IntersectionIdx dest_intersection_id = -1;
+std::vector<StreetSegmentIdx> current_route; 
+const double DEFAULT_TURN_PENALTY = 15.0; // Usually provided by the autotester, but good to have a default for UI
 
 // Constants for projections
 double cos_lat_avg;
@@ -658,49 +663,56 @@ static void attach_autocomplete(GtkEntry* entry, ezgl::application* app) {
   g_object_unref(completion);
 }
 
-// Event Handlers & Callbacks
-void act_on_mouse_click(ezgl::application* app, GdkEventButton*, double x,
-                        double y) {
-  // If we just selected a search, don't treat the click as a new selection
-  // (ignore it and refresh)
-  if (search_just_selected) {
-    search_just_selected = false;
-    app->refresh_drawing();
-    return;
-  }
+void act_on_mouse_click(ezgl::application* app, GdkEventButton* event, double x, double y) {
+    // 1. Convert the click x/y canvas coordinates back to LatLon using your helper functions
+    float lat = latFromY(y);
+    float lon = lonFromX(x);
+    LatLon click_latlon(lat, lon);
+    
+    // 2. Find the closest intersection using your M1 API
+    IntersectionIdx clicked_id = findClosestIntersection(click_latlon);
 
-  // Reset previous search result state on new click
-  search_result_intersection = -1;
-  search_result_x = -1;
-  search_result_y = -1;
-  search_result_is_poi = false;
-  highlighted_intersections.clear();
-
-  // Find the closest intersection to the clicked position
-  LatLon clicked_pos(latFromY(y), lonFromX(x));
-  selected_intersection = findClosestIntersection(clicked_pos);
-
-  // If an intersection is close enough, show its details and highlight it
-  if (selected_intersection != -1) {
-    int id = selected_intersection;
-
-    // Find all unique streets connected to this intersection
-    auto segs = findStreetSegmentsOfIntersection(id);
-    std::unordered_set<int> street_ids;
-    for (auto seg_id : segs) {
-      street_ids.insert(getStreetSegmentInfo(seg_id).streetID);
+    // 3. State Machine Logic
+    if (start_intersection_id == -1) {
+        // First click: Set the start point
+        start_intersection_id = clicked_id;
+        std::string msg = "Start set: " + getIntersectionName(clicked_id);
+        std::cout << msg << std::endl;
+        app->update_message(msg);
+        
+    } else if (dest_intersection_id == -1) {
+        // Second click: Set the destination and find the path
+        dest_intersection_id = clicked_id;
+        std::string msg = "Destination set: " + getIntersectionName(clicked_id);
+        std::cout << msg << std::endl;
+        app->update_message(msg);
+        
+        // Call your M3 function!
+        current_route = findPathBetweenIntersections(DEFAULT_TURN_PENALTY, 
+                                                     {start_intersection_id, dest_intersection_id});
+        
+        if (current_route.empty()) {
+            std::string err = "No valid path found!";
+            std::cout << err << std::endl;
+            app->update_message(err);
+        } else {
+            std::string success = "Path found with " + std::to_string(current_route.size()) + " segments.";
+            std::cout << success << std::endl;
+            app->update_message(success);
+        }
+        
+    } else {
+        // Third click: Reset everything and treat this as a new start point
+        start_intersection_id = clicked_id;
+        dest_intersection_id = -1;
+        current_route.clear();
+        std::string msg = "Resetting search. New start set: " + getIntersectionName(clicked_id);
+        std::cout << msg << std::endl;
+        app->update_message(msg);
     }
 
-    // Update message bar with intersection details
-    std::stringstream ss;
-    ss << "Intersection: " << intersections[id].name << " (ID " << id << ")"
-       << " | Connected Streets: " << street_ids.size();
-
-    app->update_message(ss.str());
-
-    speak(std::string("Intersection: ") + intersections[id].name);
-  }
-  app->refresh_drawing();
+    // 4. Force the screen to redraw so we can see the highlighted points and path
+    app->refresh_drawing();
 }
 
 // Find and highlight intersections between two streets given their names
@@ -1728,7 +1740,47 @@ void draw_main_canvas(ezgl::renderer *g) {
   g->set_font_size(10);
   // Shift the text slightly up (positive Y) so it floats above the line
   g->draw_text({(start_x + end_x) / 2.0, y_pos + (tick_height * 2.5)}, scale_text);
-}  
+
+  // 1. Highlight the Start Intersection
+    if (start_intersection_id != -1) {
+        ezgl::point2d start_center = {intersections[start_intersection_id].x, intersections[start_intersection_id].y};
+        g->set_color(ezgl::GREEN);
+        g->fill_arc(start_center, 10, 0, 360); // Draw a green circle
+    }
+
+    // 2. Highlight the Destination Intersection
+    if (dest_intersection_id != -1) {
+        ezgl::point2d dest_center = {intersections[dest_intersection_id].x, intersections[dest_intersection_id].y};
+        g->set_color(ezgl::RED);
+        g->fill_arc(dest_center, 10, 0, 360); // Draw a red circle
+    }
+
+    // 3. Draw the Route
+    if (!current_route.empty()) {
+        g->set_color(ezgl::BLUE);
+        g->set_line_width(5); // Make it thick so it's easy to see
+        g->set_line_cap(ezgl::line_cap::round);
+
+        for (StreetSegmentIdx seg_id : current_route) {
+            StreetSegmentInfo info = getStreetSegmentInfo(seg_id);
+            
+            LatLon from_latlon = getIntersectionPosition(info.from);
+            ezgl::point2d prev_point = {xFromLon(from_latlon.longitude()), yFromLat(from_latlon.latitude())};
+            for (int i = 0; i < info.numCurvePoints; ++i) {
+                LatLon curve_latlon = getStreetSegmentCurvePoint(seg_id, i);
+                ezgl::point2d curr_point = {xFromLon(curve_latlon.longitude()), yFromLat(curve_latlon.latitude())};
+                g->draw_line(prev_point, curr_point);
+                prev_point = curr_point;
+            }
+            
+            // Draw the final line segment to the destination intersection
+            LatLon to_latlon = getIntersectionPosition(info.to);
+            ezgl::point2d final_point = {xFromLon(to_latlon.longitude()), yFromLat(to_latlon.latitude())};
+            g->draw_line(prev_point, final_point); 
+        }
+    }
+}
+
 
 // Main function to initialize and run the application
 void drawMap() {

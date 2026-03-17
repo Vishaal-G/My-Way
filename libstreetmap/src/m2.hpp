@@ -29,6 +29,7 @@ typedef void*                  gpointer;
 #include "ezgl/application.hpp"
 #include "ezgl/graphics.hpp"
 #include "m1.hpp"
+#include "m3.hpp"
 
 // Constants
 extern double cos_lat_avg;
