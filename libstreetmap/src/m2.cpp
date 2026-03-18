@@ -65,7 +65,9 @@
 // Global UI State Variables
 IntersectionIdx start_intersection_id = -1;
 IntersectionIdx dest_intersection_id = -1;
-std::vector<StreetSegmentIdx> current_route; 
+std::vector<StreetSegmentIdx> current_drive_route; 
+std::vector<StreetSegmentIdx> current_walk_route; 
+bool is_walk_mode = false;
 const double DEFAULT_TURN_PENALTY = 15.0; // Usually provided by the autotester, but good to have a default for UI
 
 // Constants for projections
@@ -681,31 +683,62 @@ void act_on_mouse_click(ezgl::application* app, GdkEventButton* event, double x,
         app->update_message(msg);
         
     } else if (dest_intersection_id == -1) {
-        // Second click: Set the destination and find the path
-        dest_intersection_id = clicked_id;
-        std::string msg = "Destination set: " + getIntersectionName(clicked_id);
-        std::cout << msg << std::endl;
-        app->update_message(msg);
+        // Second click: Set the destination FIRST
+        dest_intersection_id = clicked_id; 
         
-        // Call your M3 function!
-        current_route = findPathBetweenIntersections(DEFAULT_TURN_PENALTY, 
-                                                     {start_intersection_id, dest_intersection_id});
-        
-        if (current_route.empty()) {
-            std::string err = "No valid path found!";
-            std::cout << err << std::endl;
-            app->update_message(err);
+        if (!is_walk_mode) {
+            // DRIVE ONLY MODE
+            current_walk_route.clear(); // Ensure walk route is empty
+            current_drive_route = findPathBetweenIntersections(DEFAULT_TURN_PENALTY, 
+                                                               {start_intersection_id, dest_intersection_id});
         } else {
-            std::string success = "Path found with " + std::to_string(current_route.size()) + " segments.";
-            std::cout << success << std::endl;
-            app->update_message(success);
+            // WALK + DRIVE MODE
+            // 1. Fetch values from the text entries safely
+            GtkEntry* speed_entry = GTK_ENTRY(app->get_object("WalkSpeedEntry"));
+            GtkEntry* time_entry = GTK_ENTRY(app->get_object("WalkTimeEntry"));
+            
+            double walk_speed = 1.5;   // Default fallback [m/sec]
+            double walk_time = 300.0;  // Default fallback [sec]
+            
+            // 2. Safely parse the text to doubles if the widgets exist
+            try {
+                if (speed_entry) {
+                    std::string speed_str = gtk_entry_get_text(speed_entry);
+                    if (!speed_str.empty()) walk_speed = std::stod(speed_str);
+                }
+                if (time_entry) {
+                    std::string time_str = gtk_entry_get_text(time_entry);
+                    if (!time_str.empty()) walk_time = std::stod(time_str);
+                }
+            } catch (...) {
+                std::cout << "Invalid speed/time input. Using defaults." << std::endl;
+            }
+
+            // 3. Call the Uber-pool function
+            auto paths = findPathWithWalkToPickUp(start_intersection_id, dest_intersection_id, 
+                                                  DEFAULT_TURN_PENALTY, walk_speed, walk_time);
+            
+            current_walk_route = paths.first;
+            current_drive_route = paths.second;
+        }
+
+        // Error checking for UI message
+        if (current_drive_route.empty() && current_walk_route.empty()) {
+            app->update_message("Error: No valid path could be found.");
+        } else {
+            app->update_message("Path found! Walk segments: " + std::to_string(current_walk_route.size()) + 
+                                " | Drive segments: " + std::to_string(current_drive_route.size()));
         }
         
     } else {
         // Third click: Reset everything and treat this as a new start point
         start_intersection_id = clicked_id;
         dest_intersection_id = -1;
-        current_route.clear();
+        
+        // Clear BOTH route vectors
+        current_drive_route.clear();
+        current_walk_route.clear();
+        
         std::string msg = "Resetting search. New start set: " + getIntersectionName(clicked_id);
         std::cout << msg << std::endl;
         app->update_message(msg);
@@ -974,9 +1007,25 @@ static void on_night_mode_toggled(GObject* object, GParamSpec*, gpointer data) {
   app->refresh_drawing();
 }
 
+static void on_mode_switch_toggled(GObject* object, GParamSpec*, gpointer data) {
+    is_walk_mode = gtk_switch_get_active(GTK_SWITCH(object));
+    auto* app = static_cast<ezgl::application*>(data);
+    
+    if (is_walk_mode) {
+        app->update_message("Mode: Walk + Drive. Please ensure Speed and Time Limit are set.");
+    } else {
+        app->update_message("Mode: Drive Only.");
+    }
+}
+
 // Initial setup function to connect signals and prepare the application
 void initial_setup(ezgl::application* app, bool) {
   GtkWidget* find_btn = GTK_WIDGET(app->get_object("FindButton"));
+
+  GtkWidget* mode_switch = GTK_WIDGET(app->get_object("ModeSwitch"));
+  if (mode_switch) {
+      g_signal_connect(mode_switch, "notify::active", G_CALLBACK(on_mode_switch_toggled), app);
+  }
 
   // Connect the "Find" button to its handler
   if (find_btn)
@@ -1756,27 +1805,49 @@ void draw_main_canvas(ezgl::renderer *g) {
     }
 
     // 3. Draw the Route
-    if (!current_route.empty()) {
-        g->set_color(ezgl::BLUE);
-        g->set_line_width(5); // Make it thick so it's easy to see
-        g->set_line_cap(ezgl::line_cap::round);
+    if (!current_walk_route.empty()) {
+        g->set_color(ezgl::color(100, 150, 255, 200)); // Lighter blue for walking
+        g->set_line_width(4);
+        g->set_line_dash(ezgl::line_dash::asymmetric_5_3); // Make it a dashed line!
 
-        for (StreetSegmentIdx seg_id : current_route) {
+        for (StreetSegmentIdx seg_id : current_walk_route) {
             StreetSegmentInfo info = getStreetSegmentInfo(seg_id);
-            
             LatLon from_latlon = getIntersectionPosition(info.from);
             ezgl::point2d prev_point = {xFromLon(from_latlon.longitude()), yFromLat(from_latlon.latitude())};
+            
             for (int i = 0; i < info.numCurvePoints; ++i) {
                 LatLon curve_latlon = getStreetSegmentCurvePoint(seg_id, i);
                 ezgl::point2d curr_point = {xFromLon(curve_latlon.longitude()), yFromLat(curve_latlon.latitude())};
                 g->draw_line(prev_point, curr_point);
                 prev_point = curr_point;
             }
-            
-            // Draw the final line segment to the destination intersection
             LatLon to_latlon = getIntersectionPosition(info.to);
             ezgl::point2d final_point = {xFromLon(to_latlon.longitude()), yFromLat(to_latlon.latitude())};
-            g->draw_line(prev_point, final_point); 
+            g->draw_line(prev_point, final_point);
+        }
+        g->set_line_dash(ezgl::line_dash::none); // Reset dash so we don't break other lines
+    }
+
+    // 3B. Draw the Driving Route (e.g., Solid Dark Blue)
+    if (!current_drive_route.empty()) {
+        g->set_color(ezgl::BLUE);
+        g->set_line_width(6); 
+        g->set_line_cap(ezgl::line_cap::round);
+
+        for (StreetSegmentIdx seg_id : current_drive_route) {
+            StreetSegmentInfo info = getStreetSegmentInfo(seg_id);
+            LatLon from_latlon = getIntersectionPosition(info.from);
+            ezgl::point2d prev_point = {xFromLon(from_latlon.longitude()), yFromLat(from_latlon.latitude())};
+            
+            for (int i = 0; i < info.numCurvePoints; ++i) {
+                LatLon curve_latlon = getStreetSegmentCurvePoint(seg_id, i);
+                ezgl::point2d curr_point = {xFromLon(curve_latlon.longitude()), yFromLat(curve_latlon.latitude())};
+                g->draw_line(prev_point, curr_point);
+                prev_point = curr_point;
+            }
+            LatLon to_latlon = getIntersectionPosition(info.to);
+            ezgl::point2d final_point = {xFromLon(to_latlon.longitude()), yFromLat(to_latlon.latitude())};
+            g->draw_line(prev_point, final_point);
         }
     }
 }
