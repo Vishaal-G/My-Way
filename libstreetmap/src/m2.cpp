@@ -132,6 +132,114 @@ bool ends_with(const std::string& text, const std::string& suffix) {
   return text.compare(text.size() - suffix.size(), suffix.size(), suffix) == 0;
 }
 
+// 1. Helper to find an intersection ID from exact string name
+// Helper to find intersection from exact match OR a casual string like "street1 & street2"
+IntersectionIdx get_intersection_from_casual_string(std::string query) {
+    // 1. Check if it's an exact match first (from clicking an autocomplete suggestion)
+    for (int i = 0; i < (int)intersections.size(); ++i) {
+        if (intersections[i].name == query) return i;
+    }
+
+    // 2. Look for an '&' or 'and' to split the string into two streets
+    size_t split_pos = query.find("&");
+    if (split_pos == std::string::npos) split_pos = query.find(" and ");
+
+    if (split_pos != std::string::npos) {
+        std::string s1 = query.substr(0, split_pos);
+        
+        // Offset by length of the delimiter ("&" is 1, " and " is 5)
+        size_t offset = (query[split_pos] == '&') ? 1 : 5;
+        std::string s2 = query.substr(split_pos + offset);
+
+        // Trim leading and trailing spaces
+        s1.erase(0, s1.find_first_not_of(" \t"));
+        s1.erase(s1.find_last_not_of(" \t") + 1);
+        s2.erase(0, s2.find_first_not_of(" \t"));
+        s2.erase(s2.find_last_not_of(" \t") + 1);
+
+        // Find the intersection of these two streets
+        auto s1_ids = findStreetIdsFromPartialStreetName(s1);
+        auto s2_ids = findStreetIdsFromPartialStreetName(s2);
+
+        for (int id1 : s1_ids) {
+            for (int id2 : s2_ids) {
+                auto common_ints = findIntersectionsOfTwoStreets(id1, id2);
+                if (!common_ints.empty()) {
+                    return common_ints[0]; // Return the first valid intersection found
+                }
+            }
+        }
+    }
+    return -1; // Not found
+}
+
+// 2. Extracted routing logic
+void calculate_and_display_route(ezgl::application* app) {
+    if (start_intersection_id == -1 || dest_intersection_id == -1) return;
+
+    if (!is_walk_mode) {
+        current_walk_route.clear(); 
+        current_drive_route = findPathBetweenIntersections(DEFAULT_TURN_PENALTY, 
+                                                           {start_intersection_id, dest_intersection_id});
+    } else {
+        GtkEntry* speed_entry = GTK_ENTRY(app->get_object("WalkSpeedEntry"));
+        GtkEntry* time_entry = GTK_ENTRY(app->get_object("WalkTimeEntry"));
+        
+        double walk_speed = 1.5;   
+        double walk_time = 300.0;  
+        
+        try {
+            if (speed_entry) {
+                std::string speed_str = gtk_entry_get_text(speed_entry);
+                if (!speed_str.empty()) walk_speed = std::stod(speed_str);
+            }
+            if (time_entry) {
+                std::string time_str = gtk_entry_get_text(time_entry);
+                if (!time_str.empty()) walk_time = std::stod(time_str);
+            }
+        } catch (...) {
+            std::cout << "Invalid speed/time input. Using defaults." << std::endl;
+        }
+
+        auto paths = findPathWithWalkToPickUp(start_intersection_id, dest_intersection_id, 
+                                              DEFAULT_TURN_PENALTY, walk_speed, walk_time);
+        current_walk_route = paths.first;
+        current_drive_route = paths.second;
+    }
+
+    if (current_drive_route.empty() && current_walk_route.empty()) {
+        app->update_message("Error: No valid path could be found.");
+    } else {
+        app->update_message("Path found! Walk segments: " + std::to_string(current_walk_route.size()) + 
+                            " | Drive segments: " + std::to_string(current_drive_route.size()));
+    }
+}
+
+// 3. The GTK callback for the Route button
+static void on_route_button_clicked(GtkWidget*, gpointer data) {
+    auto* app = static_cast<ezgl::application*>(data);
+
+    GtkEntry* start_entry = GTK_ENTRY(app->get_object("StartEntry"));
+    GtkEntry* dest_entry = GTK_ENTRY(app->get_object("DestEntry"));
+
+    if (start_entry && dest_entry) {
+        std::string start_str = gtk_entry_get_text(start_entry);
+        std::string dest_str = gtk_entry_get_text(dest_entry);
+
+        if (!start_str.empty()) {
+            IntersectionIdx id = get_intersection_from_casual_string(start_str);
+            if (id != -1) start_intersection_id = id;
+        }
+        if (!dest_str.empty()) {
+            IntersectionIdx id = get_intersection_from_casual_string(dest_str);
+            if (id != -1) dest_intersection_id = id;
+        }
+    }
+
+    calculate_and_display_route(app);
+    app->refresh_drawing();
+}
+
 static bool is_night_mode = false;
 
 //Returns the colour that the subway lines should be 
@@ -686,50 +794,10 @@ void act_on_mouse_click(ezgl::application* app, GdkEventButton* event, double x,
         // Second click: Set the destination FIRST
         dest_intersection_id = clicked_id; 
         
-        if (!is_walk_mode) {
-            // DRIVE ONLY MODE
-            current_walk_route.clear(); // Ensure walk route is empty
-            current_drive_route = findPathBetweenIntersections(DEFAULT_TURN_PENALTY, 
-                                                               {start_intersection_id, dest_intersection_id});
-        } else {
-            // WALK + DRIVE MODE
-            // 1. Fetch values from the text entries safely
-            GtkEntry* speed_entry = GTK_ENTRY(app->get_object("WalkSpeedEntry"));
-            GtkEntry* time_entry = GTK_ENTRY(app->get_object("WalkTimeEntry"));
-            
-            double walk_speed = 1.5;   // Default fallback [m/sec]
-            double walk_time = 300.0;  // Default fallback [sec]
-            
-            // 2. Safely parse the text to doubles if the widgets exist
-            try {
-                if (speed_entry) {
-                    std::string speed_str = gtk_entry_get_text(speed_entry);
-                    if (!speed_str.empty()) walk_speed = std::stod(speed_str);
-                }
-                if (time_entry) {
-                    std::string time_str = gtk_entry_get_text(time_entry);
-                    if (!time_str.empty()) walk_time = std::stod(time_str);
-                }
-            } catch (...) {
-                std::cout << "Invalid speed/time input. Using defaults." << std::endl;
-            }
-
-            // 3. Call the Uber-pool function
-            auto paths = findPathWithWalkToPickUp(start_intersection_id, dest_intersection_id, 
-                                                  DEFAULT_TURN_PENALTY, walk_speed, walk_time);
-            
-            current_walk_route = paths.first;
-            current_drive_route = paths.second;
-        }
-
-        // Error checking for UI message
-        if (current_drive_route.empty() && current_walk_route.empty()) {
-            app->update_message("Error: No valid path could be found.");
-        } else {
-            app->update_message("Path found! Walk segments: " + std::to_string(current_walk_route.size()) + 
-                                " | Drive segments: " + std::to_string(current_drive_route.size()));
-        }
+        // Calculate the route using our new helper!
+        calculate_and_display_route(app);
         
+
     } else {
         // Third click: Reset everything and treat this as a new start point
         start_intersection_id = clicked_id;
@@ -1022,6 +1090,8 @@ static void on_mode_switch_toggled(GObject* object, GParamSpec*, gpointer data) 
 void initial_setup(ezgl::application* app, bool) {
   GtkWidget* find_btn = GTK_WIDGET(app->get_object("FindButton"));
 
+  
+
   GtkWidget* mode_switch = GTK_WIDGET(app->get_object("ModeSwitch"));
   if (mode_switch) {
       g_signal_connect(mode_switch, "notify::active", G_CALLBACK(on_mode_switch_toggled), app);
@@ -1051,12 +1121,17 @@ void initial_setup(ezgl::application* app, bool) {
 
   // Attach autocomplete to the top search entry
   GtkEntry* top_search = GTK_ENTRY(app->get_object("TopSearch"));
-  // GtkEntry* e1 = GTK_ENTRY(app->get_object("Street1Entry"));
-  // GtkEntry* e2 = GTK_ENTRY(app->get_object("Street2Entry"));
+  GtkEntry* e1 = GTK_ENTRY(app->get_object("Street1Entry"));
+  GtkEntry* e2 = GTK_ENTRY(app->get_object("Street2Entry"));
 
   if (top_search) attach_autocomplete(top_search, app);
-  // if (e1) attach_autocomplete(e1, app);
-  // if (e2) attach_autocomplete(e2, app);
+  if (e1) attach_autocomplete(e1, app);
+  if (e2) attach_autocomplete(e2, app);
+
+  GtkWidget* route_btn = GTK_WIDGET(app->get_object("RouteButton"));
+  if (route_btn) {
+      g_signal_connect(route_btn, "clicked", G_CALLBACK(on_route_button_clicked), app);
+  }
 
   // Populate the map selection combo box with discovered maps
   discover_map_paths();
