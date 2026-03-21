@@ -113,3 +113,18 @@ void clearWavefront() {
     std::priority_queue<WaveElem, std::vector<WaveElem>, CompareWaveElem> empty;
     std::swap(wavefront, empty);
 }
+
+// Clean up pathfinding data structures
+void cleanupPathfinding() {
+    nodes.clear();
+    nodes.shrink_to_fit();
+    segmentTravelTimes.clear();
+    segmentTravelTimes.shrink_to_fit();
+    walkNodes.clear();
+    walkNodes.shrink_to_fit();
+    segmentWalkingLengths.clear();
+    segmentWalkingLengths.shrink_to_fit();
+    intersectionPositions.clear();
+    intersectionPositions.shrink_to_fit();
+    clearWavefront();
+}
