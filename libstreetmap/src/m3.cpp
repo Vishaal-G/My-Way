@@ -208,3 +208,32 @@ double computePathTravelTime(const double turn_penalty,
     
     return totalTime;
 }
+
+// Compute walking time for a given path
+double computePathWalkingTime(const std::vector<StreetSegmentIdx>& path,
+                              const double walking_speed,
+                              const double turn_penalty) {
+    if (path.empty()) return 0.0;
+    
+    double totalTime = 0.0;
+    StreetIdx prevStreet = NO_STREET;
+    
+    for (StreetSegmentIdx segID : path) {
+        // Add segment walking time
+        double length = findStreetSegmentLength(segID);
+        totalTime += length / walking_speed;
+        
+        // Check for turn
+        StreetSegmentInfo info = getStreetSegmentInfo(segID);
+        StreetIdx currentStreet = info.streetID;
+        
+        if (prevStreet != NO_STREET && prevStreet != currentStreet) {
+            // Turn detected
+            totalTime += turn_penalty;
+        }
+        
+        prevStreet = currentStreet;
+    }
+    
+    return totalTime;
+}
