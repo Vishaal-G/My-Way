@@ -237,3 +237,86 @@ double computePathWalkingTime(const std::vector<StreetSegmentIdx>& path,
     
     return totalTime;
 }
+
+// Find shortest path between two intersections using A*
+std::vector<StreetSegmentIdx> findPathBetweenIntersections(
+    const double turn_penalty,
+    const std::pair<IntersectionIdx, IntersectionIdx> intersect_ids) {
+    
+    IntersectionIdx src = intersect_ids.first;
+    IntersectionIdx dest = intersect_ids.second;
+    
+    if (src == dest) return std::vector<StreetSegmentIdx>();
+    
+    // Dirty reset — only clear nodes touched last call
+    for (IntersectionIdx idx : touchedDriveNodes) {
+        nodes[idx].bestTime = std::numeric_limits<double>::infinity();
+        nodes[idx].reachingEdge = NO_EDGE;
+        nodes[idx].visited = false;
+    }
+    touchedDriveNodes.clear();
+    clearWavefront();
+    
+    // Initialize source
+    nodes[src].bestTime = 0.0;
+    touchedDriveNodes.push_back(src);
+    wavefront.push(WaveElem(src, NO_EDGE, 0.0));
+    
+    while (!wavefront.empty()) {
+        WaveElem current = wavefront.top();
+        wavefront.pop();
+        
+        IntersectionIdx currNode = current.nodeID;
+        if (nodes[currNode].visited) continue;
+        nodes[currNode].visited = true;
+        
+        if (currNode == dest) {
+            // Trace path using nodes[]
+            std::vector<StreetSegmentIdx> path;
+            IntersectionIdx tracer = dest;
+            while (tracer != src) {
+                StreetSegmentIdx edge = nodes[tracer].reachingEdge;
+                if (edge == NO_EDGE) return std::vector<StreetSegmentIdx>();
+                path.push_back(edge);
+                StreetSegmentInfo info = getStreetSegmentInfo(edge);
+                tracer = (info.to == tracer) ? info.from : info.to;
+            }
+            std::reverse(path.begin(), path.end());
+            return path;
+        }
+        
+        StreetIdx currentStreet = NO_STREET;
+        if (current.edgeID != NO_EDGE)
+            currentStreet = getStreetSegmentInfo(current.edgeID).streetID;
+        
+        for (StreetSegmentIdx segID : findStreetSegmentsOfIntersection(currNode)) {
+            StreetSegmentInfo info = getStreetSegmentInfo(segID);
+            
+            IntersectionIdx neighbor = NO_INTERSECTION;
+            if (info.from == currNode)
+                neighbor = info.to;
+            else if (!info.oneWay)
+                neighbor = info.from;
+            else
+                continue;
+            
+            double edgeTime = segmentTravelTimes[segID];
+            double turnTime = (currentStreet != NO_STREET && currentStreet != info.streetID)
+                              ? turn_penalty : 0.0;
+            double newTime = nodes[currNode].bestTime + edgeTime + turnTime;
+            
+            if (newTime < nodes[neighbor].bestTime) {
+                // Only track first time we discover this node
+                if (nodes[neighbor].bestTime == std::numeric_limits<double>::infinity())
+                    touchedDriveNodes.push_back(neighbor);
+                nodes[neighbor].bestTime = newTime;
+                nodes[neighbor].reachingEdge = segID;
+                double priority = newTime + computeHeuristic(neighbor, dest);
+                wavefront.push(WaveElem(neighbor, segID, priority));
+            }
+        }
+    }
+    
+    return std::vector<StreetSegmentIdx>(); // No path found
+}
+
