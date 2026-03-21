@@ -128,3 +128,13 @@ void cleanupPathfinding() {
     intersectionPositions.shrink_to_fit();
     clearWavefront();
 }
+
+// Reset all nodes to initial state
+void resetNodes() {
+    for (IntersectionIdx idx : touchedDriveNodes) {
+        nodes[idx].bestTime = std::numeric_limits<double>::infinity();
+        nodes[idx].reachingEdge = NO_EDGE;
+        nodes[idx].visited = false;
+    }
+    touchedDriveNodes.clear();
+}
