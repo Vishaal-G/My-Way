@@ -77,3 +77,34 @@ static std::priority_queue<WaveElem, std::vector<WaveElem>, CompareWaveElem> wav
 
 // Precomputed segment travel times (computed once in loadMap)
 static std::vector<double> segmentTravelTimes;
+
+// Helper functions 
+
+// Initialize pathfinding data structures
+void initializePathfinding() {
+    int numIntersections = getNumIntersections();
+    nodes.resize(numIntersections);
+    walkNodes.resize(numIntersections);
+    touchedDriveNodes.reserve(numIntersections);
+    touchedWalkNodes.reserve(numIntersections);
+
+    // Precompute intersection positions
+    intersectionPositions.resize(numIntersections);
+    for (int i = 0; i < numIntersections; i++) {
+        intersectionPositions[i] = getIntersectionPosition(i);
+    }
+    
+    // Precompute travel times for all segments
+    int numSegments = getNumStreetSegments();
+    segmentTravelTimes.resize(numSegments);
+    segmentWalkingLengths.resize(numSegments);
+    
+    for (int i = 0; i < numSegments; i++) {
+        StreetSegmentInfo info = getStreetSegmentInfo(i);
+        double length = findStreetSegmentLength(i);
+        segmentTravelTimes[i] = length / info.speedLimit;
+        segmentWalkingLengths[i] = length;
+    }
+
+
+}
