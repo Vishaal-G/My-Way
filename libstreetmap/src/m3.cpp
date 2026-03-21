@@ -138,3 +138,15 @@ void resetNodes() {
     }
     touchedDriveNodes.clear();
 }
+
+// Heuristic function for A* (straight-line distance / max speed)
+double computeHeuristic(IntersectionIdx current, IntersectionIdx dest) {
+    LatLon pos1 = intersectionPositions[current];
+    LatLon pos2 = intersectionPositions[dest];
+    
+    double distance = findDistanceBetweenTwoPoints({pos1, pos2});
+    
+    // Assume max speed of 120 km/h = 33.33 m/s for heuristic
+    const double MAX_SPEED = 33.33;
+    return distance / MAX_SPEED;
+}
