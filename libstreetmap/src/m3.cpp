@@ -150,3 +150,34 @@ double computeHeuristic(IntersectionIdx current, IntersectionIdx dest) {
     const double MAX_SPEED = 33.33;
     return distance / MAX_SPEED;
 }
+
+// Trace back the path from dest to src using reaching edges
+std::vector<StreetSegmentIdx> tracePath(IntersectionIdx src, IntersectionIdx dest) {
+    std::vector<StreetSegmentIdx> path;
+    
+    IntersectionIdx current = dest;
+    
+    // Trace backwards from destination to source
+    while (current != src) {
+        StreetSegmentIdx edge = nodes[current].reachingEdge;
+        
+        if (edge == NO_EDGE) {
+            // No path exists
+            return std::vector<StreetSegmentIdx>();
+        }
+        
+        path.push_back(edge);
+        
+        // Move to the previous intersection
+        StreetSegmentInfo info = getStreetSegmentInfo(edge);
+        if (info.to == current) {
+            current = info.from;
+        } else {
+            current = info.to;
+        }
+    }
+    
+    // Reverse to get path from source to destination
+    std::reverse(path.begin(), path.end());
+    return path;
+}
