@@ -105,6 +105,11 @@ void initializePathfinding() {
         segmentTravelTimes[i] = length / info.speedLimit;
         segmentWalkingLengths[i] = length;
     }
+}
 
-
+// Clear the wavefront
+void clearWavefront() {
+    // Swap with empty — O(1) instead of O(n) while loop
+    std::priority_queue<WaveElem, std::vector<WaveElem>, CompareWaveElem> empty;
+    std::swap(wavefront, empty);
 }
