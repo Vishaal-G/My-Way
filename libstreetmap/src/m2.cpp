@@ -59,6 +59,7 @@
 #include "ezgl/graphics.hpp"
 #include "m1.hpp"
 #include "m2.hpp"
+#include "m3.hpp"
 #include "tts.h"
 
 
