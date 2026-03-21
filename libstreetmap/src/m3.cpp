@@ -181,3 +181,30 @@ std::vector<StreetSegmentIdx> tracePath(IntersectionIdx src, IntersectionIdx des
     std::reverse(path.begin(), path.end());
     return path;
 }
+
+// Compute travel time for a given path (driving)
+double computePathTravelTime(const double turn_penalty,
+                             const std::vector<StreetSegmentIdx>& path) {
+    if (path.empty()) return 0.0;
+    
+    double totalTime = 0.0;
+    StreetIdx prevStreet = NO_STREET;
+    
+    for (StreetSegmentIdx segID : path) {
+        // Add segment travel time
+        totalTime += segmentTravelTimes[segID];
+        
+        // Check for turn
+        StreetSegmentInfo info = getStreetSegmentInfo(segID);
+        StreetIdx currentStreet = info.streetID;
+        
+        if (prevStreet != NO_STREET && prevStreet != currentStreet) {
+            // Turn detected
+            totalTime += turn_penalty;
+        }
+        
+        prevStreet = currentStreet;
+    }
+    
+    return totalTime;
+}
