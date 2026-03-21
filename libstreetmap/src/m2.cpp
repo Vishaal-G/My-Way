@@ -70,6 +70,9 @@ std::vector<StreetSegmentIdx> current_walk_route;
 bool is_walk_mode = false;
 const double DEFAULT_TURN_PENALTY = 15.0; // Usually provided by the autotester, but good to have a default for UI
 
+// Popup box state for directions
+static GtkWidget* active_route_dialog = nullptr;
+
 // Constants for projections
 double cos_lat_avg;
 
@@ -173,6 +176,102 @@ IntersectionIdx get_intersection_from_casual_string(std::string query) {
     return -1; // Not found
 }
 
+// Generate human-readable directions from a vector of street segments
+std::string generate_directions_text(const std::vector<StreetSegmentIdx>& route, bool is_walk) {
+    if (route.empty()) return "";
+    
+    std::ostringstream text;
+    text << (is_walk ? "🚶 WALKING DIRECTIONS 🚶\n" : "🚗 DRIVING DIRECTIONS 🚗\n");
+    text << "------------------------\n";
+
+    StreetSegmentInfo prev_info = getStreetSegmentInfo(route[0]);
+    std::string current_street = getStreetName(prev_info.streetID);
+    double current_length = findStreetSegmentLength(route[0]);
+    float current_speed = prev_info.speedLimit;
+
+    // Loop through the route and group segments with the same name
+    for (size_t i = 1; i < route.size(); ++i) {
+        StreetSegmentInfo info = getStreetSegmentInfo(route[i]);
+        std::string street_name = getStreetName(info.streetID);
+
+        if (street_name == current_street) {
+            // Still on the same street, just add to the distance
+            current_length += findStreetSegmentLength(route[i]);
+        } else {
+            // Street changed! Print the instruction for the street we just finished
+            text << "• Continue on " << (current_street == "<unknown>" ? "Unknown Street" : current_street)
+                 << " for " << std::round(current_length) << " m "
+                 << "(Limit: " << current_speed << " km/h)\n";
+            
+            text << "• Turn onto " << (street_name == "<unknown>" ? "Unknown Street" : street_name) << "\n";
+
+            // Reset trackers for the new street
+            current_street = street_name;
+            current_length = findStreetSegmentLength(route[i]);
+            current_speed = info.speedLimit;
+        }
+    }
+    
+    // Print the final leg of the journey
+    text << "• Continue on " << (current_street == "<unknown>" ? "Unknown Street" : current_street)
+         << " for " << std::round(current_length) << " m "
+         << "(Limit: " << current_speed << " km/h)\n";
+    text << "🏁 Arrive at destination.\n\n";
+
+    return text.str();
+}
+
+// Create and show a scrollable GTK dialog with the directions
+void show_directions_dialog(ezgl::application* app, const std::string& text) {
+    // Close existing dialog if one is already open
+    if (active_route_dialog != nullptr) {
+        gtk_widget_destroy(active_route_dialog);
+        active_route_dialog = nullptr;
+    }
+
+    // Create the dialog window
+    active_route_dialog = gtk_dialog_new_with_buttons(
+        "Turn-by-Turn Directions",
+        GTK_WINDOW(app->get_object("MainWindow")),
+        GTK_DIALOG_DESTROY_WITH_PARENT, 
+        "Close", GTK_RESPONSE_CLOSE, 
+        nullptr);
+
+    gtk_window_set_default_size(GTK_WINDOW(active_route_dialog), 450, 500);
+
+    // Create a scrollable area
+    GtkWidget* scroll = gtk_scrolled_window_new(nullptr, nullptr);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+
+    // Create the text view
+    GtkWidget* text_view = gtk_text_view_new();
+    gtk_text_view_set_editable(GTK_TEXT_VIEW(text_view), FALSE);
+    gtk_text_view_set_cursor_visible(GTK_TEXT_VIEW(text_view), FALSE);
+    gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(text_view), GTK_WRAP_WORD);
+    
+    // Set margins for better reading
+    gtk_text_view_set_left_margin(GTK_TEXT_VIEW(text_view), 10);
+    gtk_text_view_set_right_margin(GTK_TEXT_VIEW(text_view), 10);
+    gtk_text_view_set_top_margin(GTK_TEXT_VIEW(text_view), 10);
+
+    // Inject our directions text
+    GtkTextBuffer* buf = gtk_text_view_get_buffer(GTK_TEXT_VIEW(text_view));
+    gtk_text_buffer_set_text(buf, text.c_str(), -1);
+
+    // Pack it all together
+    gtk_container_add(GTK_CONTAINER(scroll), text_view);
+    gtk_box_pack_start(GTK_BOX(gtk_dialog_get_content_area(GTK_DIALOG(active_route_dialog))), scroll, TRUE, TRUE, 0);
+
+    // Handle the close button safely
+    g_signal_connect(active_route_dialog, "response", G_CALLBACK(+[](GtkDialog* d, gint, gpointer) {
+        gtk_widget_destroy(GTK_WIDGET(d));
+        active_route_dialog = nullptr;
+    }), nullptr);
+
+    gtk_widget_show_all(active_route_dialog);
+}
+
+
 // 2. Extracted routing logic
 void calculate_and_display_route(ezgl::application* app) {
     if (start_intersection_id == -1 || dest_intersection_id == -1) return;
@@ -210,8 +309,20 @@ void calculate_and_display_route(ezgl::application* app) {
     if (current_drive_route.empty() && current_walk_route.empty()) {
         app->update_message("Error: No valid path could be found.");
     } else {
-        app->update_message("Path found! Walk segments: " + std::to_string(current_walk_route.size()) + 
-                            " | Drive segments: " + std::to_string(current_drive_route.size()));
+        // 1. Update the message bar briefly
+        app->update_message("Path found! Displaying turn-by-turn directions.");
+        
+        // 2. Generate the text
+        std::string full_directions = "";
+        if (!current_walk_route.empty()) {
+            full_directions += generate_directions_text(current_walk_route, true);
+        }
+        if (!current_drive_route.empty()) {
+            full_directions += generate_directions_text(current_drive_route, false);
+        }
+
+        // 3. Pop up the window!
+        show_directions_dialog(app, full_directions);
     }
 }
 
@@ -585,7 +696,7 @@ void build_autocomplete_store() {
   }
 }
 
-// After a user selects an autocomplete match, zoom to it and show details
+// After a user selects an autocomplete match, highlight it and show details (No Auto-Zoom)
 static gboolean on_autocomplete_match_selected(GtkEntryCompletion*,
                                                GtkTreeModel* model,
                                                GtkTreeIter* iter,
@@ -616,26 +727,9 @@ static gboolean on_autocomplete_match_selected(GtkEntryCompletion*,
       auto ints = findIntersectionsOfStreet(street_ids[0]);
       highlighted_intersections = ints;
 
-      // Zoom to the first intersection of the first matching street
+      // Select the first intersection of the first matching street (No zoom)
       if (!ints.empty()) {
         selected_intersection = ints[0];
-        ezgl::canvas* c = app->get_canvas("MainCanvas");
-        if (c) {
-          float min_x = intersections[ints[0]].x;
-          float max_x = min_x;
-          float min_y = intersections[ints[0]].y;
-          float max_y = min_y;
-          for (int id : ints) {
-            min_x = std::min(min_x, intersections[id].x);
-            max_x = std::max(max_x, intersections[id].x);
-            min_y = std::min(min_y, intersections[id].y);
-            max_y = std::max(max_y, intersections[id].y);
-          }
-          float pad = std::max((max_x - min_x) * 0.2f, 300.0f);
-          ezgl::rectangle zoom_to({min_x - pad, min_y - pad},
-                                  {max_x + pad, max_y + pad});
-          c->get_camera().set_world(zoom_to);
-        }
         search_result_is_poi = false;
         search_result_intersection = ints[0];
       }
@@ -651,18 +745,12 @@ static gboolean on_autocomplete_match_selected(GtkEntryCompletion*,
   else if (type == 1) {
     selected_intersection = -1;
     highlighted_intersections.clear();
-    ezgl::canvas* c = app->get_canvas("MainCanvas");
 
-    // Zoom to the POI
-    if (c && idx < (int)Mypois.size()) {
-      float cx = Mypois[idx].x;
-      float cy = Mypois[idx].y;
-      float half = 500.0f;
-      ezgl::rectangle zoom_to({cx - half, cy - half}, {cx + half, cy + half});
-      c->get_camera().set_world(zoom_to);
+    // Select the POI (No zoom)
+    if (idx < (int)Mypois.size()) {
       search_result_is_poi = true;
-      search_result_x = cx;
-      search_result_y = cy;
+      search_result_x = Mypois[idx].x;
+      search_result_y = Mypois[idx].y;
     }
 
     // Show POI details in the message bar
@@ -673,8 +761,7 @@ static gboolean on_autocomplete_match_selected(GtkEntryCompletion*,
     ss << "POI: " << Mypois[idx].name
        << " | Type: " << cat.label;  // Show POI category label
 
-    int nearest = findClosestIntersection(
-        Mypois[idx].position);  // Find nearest intersection to POI
+    int nearest = findClosestIntersection(Mypois[idx].position);  // Find nearest intersection to POI
     if (nearest >= 0 && nearest < (int)intersections.size()) {
       ss << " | Near: " << intersections[nearest].name;
     }
@@ -686,30 +773,23 @@ static gboolean on_autocomplete_match_selected(GtkEntryCompletion*,
       std::string clean = Mypois[idx].name;
       speak(std::string("Point of interest: ") + clean);
     }
-
   }
 
   // Intersection selected
   else if (type == 2) {
     selected_intersection = idx;
     highlighted_intersections.clear();
-    ezgl::canvas* c = app->get_canvas("MainCanvas");
 
-    // Zoom to the intersection
-    if (c && idx < (int)intersections.size()) {
-      float cx = intersections[idx].x;
-      float cy = intersections[idx].y;
-      float half = 300.0f;
-      ezgl::rectangle zoom_to({cx - half, cy - half}, {cx + half, cy + half});
-      c->get_camera().set_world(zoom_to);
+    // Select the intersection (No zoom)
+    if (idx < (int)intersections.size()) {
+      search_result_is_poi = false;
+      search_result_intersection = idx;
     }
 
     // Show intersection details in the message bar
     std::stringstream ss;
     ss << "Intersection: " << intersections[idx].name;
     app->update_message(ss.str());
-    search_result_is_poi = false;
-    search_result_intersection = idx;
 
     // TTS announcement for intersection
     speak(std::string("Intersection: ") + intersections[idx].name);
@@ -752,8 +832,9 @@ static gboolean on_autocomplete_match_selected(GtkEntryCompletion*,
   if (name) g_free(name);
   search_just_selected = true;
   app->refresh_drawing();
-  return TRUE;
+  return FALSE;
 }
+
 
 // Attach autocomplete functionality to a GtkEntry widget
 static void attach_autocomplete(GtkEntry* entry, ezgl::application* app) {
@@ -1039,19 +1120,19 @@ void load_selected_map(GtkWidget*, gpointer data) {
   //Update UI components
   //Updates the autocomplete data to the search functions 
   GtkEntry *top_search = GTK_ENTRY(app->get_object("TopSearch"));
-  GtkEntry *e1 = GTK_ENTRY(app->get_object("Street1Entry"));
-  GtkEntry *e2 = GTK_ENTRY(app->get_object("Street2Entry"));
+  GtkEntry *start_entry = GTK_ENTRY(app->get_object("StartEntry"));
+  GtkEntry *dest_entry = GTK_ENTRY(app->get_object("DestEntry"));
 
   if (top_search) {
     GtkEntryCompletion *c = gtk_entry_get_completion(top_search);
     if (c) gtk_entry_completion_set_model(c, GTK_TREE_MODEL(autocomplete_store));
   }
-  if (e1) {
-    GtkEntryCompletion *c = gtk_entry_get_completion(e1);
+  if (start_entry) {
+    GtkEntryCompletion *c = gtk_entry_get_completion(start_entry);
     if (c) gtk_entry_completion_set_model(c, GTK_TREE_MODEL(autocomplete_store));
   }
-  if (e2) {
-    GtkEntryCompletion *c = gtk_entry_get_completion(e2);
+  if (dest_entry) {
+    GtkEntryCompletion *c = gtk_entry_get_completion(dest_entry);
     if (c) gtk_entry_completion_set_model(c, GTK_TREE_MODEL(autocomplete_store));
   }
 
@@ -1121,12 +1202,12 @@ void initial_setup(ezgl::application* app, bool) {
 
   // Attach autocomplete to the top search entry
   GtkEntry* top_search = GTK_ENTRY(app->get_object("TopSearch"));
-  GtkEntry* e1 = GTK_ENTRY(app->get_object("Street1Entry"));
-  GtkEntry* e2 = GTK_ENTRY(app->get_object("Street2Entry"));
+  GtkEntry* start_entry = GTK_ENTRY(app->get_object("StartEntry"));
+  GtkEntry* dest_entry = GTK_ENTRY(app->get_object("DestEntry"));
 
   if (top_search) attach_autocomplete(top_search, app);
-  if (e1) attach_autocomplete(e1, app);
-  if (e2) attach_autocomplete(e2, app);
+  if (start_entry) attach_autocomplete(start_entry, app);
+  if (dest_entry) attach_autocomplete(dest_entry, app);
 
   GtkWidget* route_btn = GTK_WIDGET(app->get_object("RouteButton"));
   if (route_btn) {
@@ -1865,18 +1946,47 @@ void draw_main_canvas(ezgl::renderer *g) {
   // Shift the text slightly up (positive Y) so it floats above the line
   g->draw_text({(start_x + end_x) / 2.0, y_pos + (tick_height * 2.5)}, scale_text);
 
-  // 1. Highlight the Start Intersection
+  /// Calculate a dynamic radius so the markers are always visible regardless of zoom
+    double marker_radius = current_zoom_width * 0.01; 
+    if (marker_radius < 15.0) marker_radius = 15.0;    // Minimum size
+    if (marker_radius > 150.0) marker_radius = 150.0;  // Maximum size
+
+    // 1. Highlight the Start Intersection
     if (start_intersection_id != -1) {
         ezgl::point2d start_center = {intersections[start_intersection_id].x, intersections[start_intersection_id].y};
-        g->set_color(ezgl::GREEN);
-        g->fill_arc(start_center, 10, 0, 360); // Draw a green circle
+        
+        // White border for contrast
+        g->set_color(ezgl::WHITE);
+        g->fill_arc(start_center, marker_radius + (current_zoom_width * 0.002), 0, 360);
+        
+        // Bright Green inner circle
+        g->set_color(ezgl::color(0, 200, 0));
+        g->fill_arc(start_center, marker_radius, 0, 360); 
+
+        // Text Label
+        if (is_night_mode) g->set_color(ezgl::WHITE);
+        else g->set_color(ezgl::BLACK);
+        g->set_font_size(12);
+        g->draw_text({start_center.x, start_center.y + marker_radius + 30}, "START");
     }
 
     // 2. Highlight the Destination Intersection
     if (dest_intersection_id != -1) {
         ezgl::point2d dest_center = {intersections[dest_intersection_id].x, intersections[dest_intersection_id].y};
-        g->set_color(ezgl::RED);
-        g->fill_arc(dest_center, 10, 0, 360); // Draw a red circle
+        
+        // White border for contrast
+        g->set_color(ezgl::WHITE);
+        g->fill_arc(dest_center, marker_radius + (current_zoom_width * 0.002), 0, 360);
+        
+        // Bright Red inner circle
+        g->set_color(ezgl::color(220, 0, 0));
+        g->fill_arc(dest_center, marker_radius, 0, 360); 
+
+        // Text Label
+        if (is_night_mode) g->set_color(ezgl::WHITE);
+        else g->set_color(ezgl::BLACK);
+        g->set_font_size(12);
+        g->draw_text({dest_center.x, dest_center.y + marker_radius + 30}, "DEST");
     }
 
     // 3. Draw the Route
@@ -1906,7 +2016,7 @@ void draw_main_canvas(ezgl::renderer *g) {
     // 3B. Draw the Driving Route (e.g., Solid Dark Blue)
     if (!current_drive_route.empty()) {
         g->set_color(ezgl::BLUE);
-        g->set_line_width(6); 
+        g->set_line_width(3); 
         g->set_line_cap(ezgl::line_cap::round);
 
         for (StreetSegmentIdx seg_id : current_drive_route) {
