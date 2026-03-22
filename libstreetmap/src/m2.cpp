@@ -144,7 +144,31 @@ bool ends_with(const std::string& text, const std::string& suffix) {
   return text.compare(text.size() - suffix.size(), suffix.size(), suffix) == 0;
 }
 
+static void show_error_dialog(ezgl::application* app, const std::string& message);
+
 IntersectionIdx get_intersection_from_casual_string(std::string query);
+
+// Helper function to standard GTK error popup
+static void show_error_dialog(ezgl::application* app, const std::string& message) {
+    GtkWidget* dialog = gtk_message_dialog_new(
+        GTK_WINDOW(app->get_object("MainWindow")),
+        GTK_DIALOG_DESTROY_WITH_PARENT,
+        GTK_MESSAGE_ERROR,
+        GTK_BUTTONS_CLOSE,
+        "%s", message.c_str()
+    );
+    gtk_window_set_title(GTK_WINDOW(dialog), "Input Error");
+    
+    // Safely close and destroy the dialog when the user clicks "Close"
+    g_signal_connect(dialog, "response", G_CALLBACK(+[](GtkDialog* d, gint, gpointer) {
+        gtk_widget_destroy(GTK_WIDGET(d));
+    }), nullptr);
+
+    gtk_widget_show_all(dialog);
+    
+    // Also log it to the message bar at the bottom
+    app->update_message("Error: " + message);
+}
 
 //Helper to find an intersection ID from exact string name
 // Helper to find intersection from exact match OR a casual string like "street1 & street2"
@@ -338,6 +362,7 @@ void calculate_and_display_route(ezgl::application* app) {
 }
 
 // The GTK callback for the Route button
+// 3. The GTK callback for the Route button
 static void on_route_button_clicked(GtkWidget*, gpointer data) {
     auto* app = static_cast<ezgl::application*>(data);
 
@@ -348,26 +373,35 @@ static void on_route_button_clicked(GtkWidget*, gpointer data) {
         std::string start_str = gtk_entry_get_text(start_entry);
         std::string dest_str = gtk_entry_get_text(dest_entry);
 
-        if (!start_str.empty()) {
-            IntersectionIdx id = get_intersection_from_casual_string(start_str);
-            if (id != -1) {
-                start_intersection_id = id;
-                gtk_entry_set_text(start_entry, intersections[id].name.c_str());
-            }
+        // --- NEW ERROR HANDLING ---
+        if (start_str.empty() || dest_str.empty()) {
+            show_error_dialog(app, "Please enter both a Start and Destination location.");
+            return;
         }
-        if (!dest_str.empty()) {
-            IntersectionIdx id = get_intersection_from_casual_string(dest_str);
-            if (id != -1) {
-                dest_intersection_id = id;
-                // Auto-fill the search bar with the official intersection name ✨
-                gtk_entry_set_text(dest_entry, intersections[id].name.c_str());
-            }
+
+        IntersectionIdx id_start = get_intersection_from_casual_string(start_str);
+        if (id_start != -1) {
+            start_intersection_id = id_start;
+            gtk_entry_set_text(start_entry, intersections[id_start].name.c_str());
+        } else {
+            show_error_dialog(app, "Invalid Start Location: '" + start_str + "'\nMake sure to include an '&' between two valid crossing streets.");
+            return;
+        }
+
+        IntersectionIdx id_dest = get_intersection_from_casual_string(dest_str);
+        if (id_dest != -1) {
+            dest_intersection_id = id_dest;
+            gtk_entry_set_text(dest_entry, intersections[id_dest].name.c_str());
+        } else {
+            show_error_dialog(app, "Invalid Destination Location: '" + dest_str + "'\nMake sure to include an '&' between two valid crossing streets.");
+            return;
         }
     }
 
     calculate_and_display_route(app);
     app->refresh_drawing();
 }
+
 
 static bool is_night_mode = false;
 
@@ -959,6 +993,23 @@ static void find_button(GtkWidget*, gpointer data) {
   std::string s1 = gtk_entry_get_text(e1);
   std::string s2 = gtk_entry_get_text(e2);
 
+  if (s1.empty() || s2.empty()) {
+      show_error_dialog(app, "Please enter both street names to find an intersection.");
+      return;
+  }
+
+  auto s1_ids = findStreetIdsFromPartialStreetName(s1);
+  auto s2_ids = findStreetIdsFromPartialStreetName(s2);
+
+  if (s1_ids.empty()) {
+      show_error_dialog(app, "Invalid Street 1: Could not find any street matching '" + s1 + "'.");
+      return;
+  }
+  if (s2_ids.empty()) {
+      show_error_dialog(app, "Invalid Street 2: Could not find any street matching '" + s2 + "'.");
+      return;
+  }
+
   // If either field is empty, show an error message and return
   find_and_highlight(s1, s2);
   const int MATCH_CAP = 50;
@@ -1128,6 +1179,7 @@ void load_selected_map(GtkWidget*, gpointer data) {
 
   if (!load_success) {
     std::cerr << "Failed to load map: " << new_map_path << std::endl;
+    show_error_dialog(app, "Failed to load map file:\n" + new_map_path + "\n\nThe file might be missing or corrupted.");
     return;
   }
 
