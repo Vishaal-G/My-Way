@@ -30,6 +30,8 @@ static double maxSpeedLimit = 0.0;
 // Helper functions (optional - can be kept internal to m3.cpp)
 void resetNodes();
 void clearWavefront();
+void initializePathfinding();
+void cleanupPathfinding();
 double computeHeuristic(IntersectionIdx current, IntersectionIdx dest);
 std::vector<StreetSegmentIdx> tracePath(IntersectionIdx src,
                                         IntersectionIdx dest);
