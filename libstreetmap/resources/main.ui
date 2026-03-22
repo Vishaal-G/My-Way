@@ -279,7 +279,8 @@
                       <object class="GtkLabel">
                         <property name="visible">True</property>
                         <property name="can-focus">False</property>
-                        <property name="label">FIND PATH (Enter two intersections eg. Don Mills &amp; Sheppard)</property>                        <property name="xalign">0</property>
+                        <property name="label">FIND PATH (Enter two intersections eg. Don Mills &amp; Sheppard)</property>
+                        <property name="xalign">0</property>
                         <property name="margin-bottom">6</property>
                         <attributes>
                           <attribute name="weight" value="bold"/>
@@ -759,6 +760,26 @@
                           </object>
                         </child>
 
+                      </object>
+                    </child>
+
+                    <child>
+                      <object class="GtkSeparator">
+                        <property name="visible">True</property>
+                        <property name="orientation">horizontal</property>
+                        <property name="margin-top">10</property>
+                        <property name="margin-bottom">10</property>
+                      </object>
+                    </child>
+
+                    <child>
+                      <object class="GtkButton" id="HelpButton">
+                        <property name="label">❓  Help / Info</property>
+                        <property name="visible">True</property>
+                        <property name="can-focus">True</property>
+                        <property name="receives-default">True</property>
+                        <property name="hexpand">True</property>
+                        <property name="margin-bottom">12</property>
                       </object>
                     </child>
 

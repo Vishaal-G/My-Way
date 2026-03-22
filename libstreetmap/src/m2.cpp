@@ -74,6 +74,9 @@ const double DEFAULT_TURN_PENALTY = 15.0; // Usually provided by the autotester,
 // Popup box state for directions
 static GtkWidget* active_route_dialog = nullptr;
 
+// Global tracker for the help dialog so we don't open 100 of them
+static GtkWidget* active_help_dialog = nullptr;
+
 // Constants for projections
 double cos_lat_avg;
 
@@ -116,7 +119,12 @@ static GtkWidget* active_find_dialog = nullptr;
 // Helper Function declaration
 static PoiCategory classify_poi(const std::string& type);
 
+//Path finding function to find the route 
+void calculate_and_display_route(ezgl::application* app);
 
+//Displays the information about the path found 
+std::string generate_directions_text(const std::vector<StreetSegmentIdx>& route, bool is_walk);;
+void show_directions_dialog(ezgl::application* app, const std::string& text);
 
 // Coordinate Conversion Functions
 float xFromLon(float lon) {
@@ -136,15 +144,17 @@ bool ends_with(const std::string& text, const std::string& suffix) {
   return text.compare(text.size() - suffix.size(), suffix.size(), suffix) == 0;
 }
 
-// 1. Helper to find an intersection ID from exact string name
+IntersectionIdx get_intersection_from_casual_string(std::string query);
+
+//Helper to find an intersection ID from exact string name
 // Helper to find intersection from exact match OR a casual string like "street1 & street2"
 IntersectionIdx get_intersection_from_casual_string(std::string query) {
-    // 1. Check if it's an exact match first (from clicking an autocomplete suggestion)
+    //Check if it's an exact match first (from clicking an autocomplete suggestion)
     for (int i = 0; i < (int)intersections.size(); ++i) {
         if (intersections[i].name == query) return i;
     }
 
-    // 2. Look for an '&' or 'and' to split the string into two streets
+    //Look for an '&' or 'and' to split the string into two streets
     size_t split_pos = query.find("&");
     if (split_pos == std::string::npos) split_pos = query.find(" and ");
 
@@ -177,7 +187,7 @@ IntersectionIdx get_intersection_from_casual_string(std::string query) {
     return -1; // Not found
 }
 
-// Generate human-readable directions from a vector of street segments
+// Generate directions from a vector of street segments
 std::string generate_directions_text(const std::vector<StreetSegmentIdx>& route, bool is_walk) {
     if (route.empty()) return "";
     
@@ -188,7 +198,7 @@ std::string generate_directions_text(const std::vector<StreetSegmentIdx>& route,
     StreetSegmentInfo prev_info = getStreetSegmentInfo(route[0]);
     std::string current_street = getStreetName(prev_info.streetID);
     double current_length = findStreetSegmentLength(route[0]);
-    float current_speed = prev_info.speedLimit;
+    int current_speed = std::round(prev_info.speedLimit * 3.6);
 
     // Loop through the route and group segments with the same name
     for (size_t i = 1; i < route.size(); ++i) {
@@ -199,7 +209,7 @@ std::string generate_directions_text(const std::vector<StreetSegmentIdx>& route,
             // Still on the same street, just add to the distance
             current_length += findStreetSegmentLength(route[i]);
         } else {
-            // Street changed! Print the instruction for the street we just finished
+            // Street changed. Print the instruction for the street we just finished
             text << "• Continue on " << (current_street == "<unknown>" ? "Unknown Street" : current_street)
                  << " for " << std::round(current_length) << " m "
                  << "(Limit: " << current_speed << " km/h)\n";
@@ -209,7 +219,7 @@ std::string generate_directions_text(const std::vector<StreetSegmentIdx>& route,
             // Reset trackers for the new street
             current_street = street_name;
             current_length = findStreetSegmentLength(route[i]);
-            current_speed = info.speedLimit;
+            current_speed = std::round(info.speedLimit * 3.6);
         }
     }
     
@@ -273,7 +283,7 @@ void show_directions_dialog(ezgl::application* app, const std::string& text) {
 }
 
 
-// 2. Extracted routing logic
+// Extracted routing logic
 void calculate_and_display_route(ezgl::application* app) {
     if (start_intersection_id == -1 || dest_intersection_id == -1) return;
 
@@ -310,10 +320,10 @@ void calculate_and_display_route(ezgl::application* app) {
     if (current_drive_route.empty() && current_walk_route.empty()) {
         app->update_message("Error: No valid path could be found.");
     } else {
-        // 1. Update the message bar briefly
+        // Update the message bar briefly
         app->update_message("Path found! Displaying turn-by-turn directions.");
         
-        // 2. Generate the text
+        // Generate the text
         std::string full_directions = "";
         if (!current_walk_route.empty()) {
             full_directions += generate_directions_text(current_walk_route, true);
@@ -322,12 +332,12 @@ void calculate_and_display_route(ezgl::application* app) {
             full_directions += generate_directions_text(current_drive_route, false);
         }
 
-        // 3. Pop up the window!
+        // Pop up the window
         show_directions_dialog(app, full_directions);
     }
 }
 
-// 3. The GTK callback for the Route button
+// The GTK callback for the Route button
 static void on_route_button_clicked(GtkWidget*, gpointer data) {
     auto* app = static_cast<ezgl::application*>(data);
 
@@ -340,11 +350,18 @@ static void on_route_button_clicked(GtkWidget*, gpointer data) {
 
         if (!start_str.empty()) {
             IntersectionIdx id = get_intersection_from_casual_string(start_str);
-            if (id != -1) start_intersection_id = id;
+            if (id != -1) {
+                start_intersection_id = id;
+                gtk_entry_set_text(start_entry, intersections[id].name.c_str());
+            }
         }
         if (!dest_str.empty()) {
             IntersectionIdx id = get_intersection_from_casual_string(dest_str);
-            if (id != -1) dest_intersection_id = id;
+            if (id != -1) {
+                dest_intersection_id = id;
+                // Auto-fill the search bar with the official intersection name ✨
+                gtk_entry_set_text(dest_entry, intersections[id].name.c_str());
+            }
         }
     }
 
@@ -856,15 +873,15 @@ static void attach_autocomplete(GtkEntry* entry, ezgl::application* app) {
 }
 
 void act_on_mouse_click(ezgl::application* app, GdkEventButton* event, double x, double y) {
-    // 1. Convert the click x/y canvas coordinates back to LatLon using your helper functions
+    // Convert the click x/y canvas coordinates back to LatLon using your helper functions
     float lat = latFromY(y);
     float lon = lonFromX(x);
     LatLon click_latlon(lat, lon);
     
-    // 2. Find the closest intersection using your M1 API
+    // Find the closest intersection using your M1 API
     IntersectionIdx clicked_id = findClosestIntersection(click_latlon);
 
-    // 3. State Machine Logic
+    // State Machine Logic
     if (start_intersection_id == -1) {
         // First click: Set the start point
         start_intersection_id = clicked_id;
@@ -876,7 +893,7 @@ void act_on_mouse_click(ezgl::application* app, GdkEventButton* event, double x,
         // Second click: Set the destination FIRST
         dest_intersection_id = clicked_id; 
         
-        // Calculate the route using our new helper!
+        // Calculate the route using our new helper
         calculate_and_display_route(app);
         
 
@@ -894,7 +911,7 @@ void act_on_mouse_click(ezgl::application* app, GdkEventButton* event, double x,
         app->update_message(msg);
     }
 
-    // 4. Force the screen to redraw so we can see the highlighted points and path
+    // Force the screen to redraw so we can see the highlighted points and path
     app->refresh_drawing();
 }
 
@@ -1168,11 +1185,92 @@ static void on_mode_switch_toggled(GObject* object, GParamSpec*, gpointer data) 
     }
 }
 
+// Callback to generate and show the Help window
+static void on_help_button_clicked(GtkWidget*, gpointer data) {
+    auto* app = static_cast<ezgl::application*>(data);
+
+    // Close any existing help dialog
+    if (active_help_dialog != nullptr) {
+        gtk_widget_destroy(active_help_dialog);
+        active_help_dialog = nullptr;
+    }
+
+    // Create the dialog window
+    active_help_dialog = gtk_dialog_new_with_buttons(
+        "🗺️ Map Features & Controls",
+        GTK_WINDOW(app->get_object("MainWindow")),
+        GTK_DIALOG_DESTROY_WITH_PARENT, 
+        "Got it!", GTK_RESPONSE_CLOSE, 
+        nullptr);
+
+    gtk_window_set_default_size(GTK_WINDOW(active_help_dialog), 500, 450);
+
+    // Create a scrollable area
+    GtkWidget* scroll = gtk_scrolled_window_new(nullptr, nullptr);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+
+    // Create the text view
+    GtkWidget* text_view = gtk_text_view_new();
+    gtk_text_view_set_editable(GTK_TEXT_VIEW(text_view), FALSE);
+    gtk_text_view_set_cursor_visible(GTK_TEXT_VIEW(text_view), FALSE);
+    gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(text_view), GTK_WRAP_WORD);
+    
+    // Set margins for nice formatting
+    gtk_text_view_set_left_margin(GTK_TEXT_VIEW(text_view), 15);
+    gtk_text_view_set_right_margin(GTK_TEXT_VIEW(text_view), 15);
+    gtk_text_view_set_top_margin(GTK_TEXT_VIEW(text_view), 15);
+    gtk_text_view_set_bottom_margin(GTK_TEXT_VIEW(text_view), 15);
+
+    //The actual help text
+    std::string help_text = 
+        "🔍 FIND INTERSECTION\n"
+        "• Top Search Bar: Type a street, POI, or intersection. Click the drop-down to select and highlight it.\n"
+        "• Between Two Streets: Enter two partial street names and click 'Find Intersection'. The map will automatically highlight the intersection(s).\n\n"
+        
+        "🛣️ FIND PATH (ROUTING)\n"
+        "• Mouse Clicks: Click two intersections on the map to instantly draw a route. Click a third time to reset.\n"
+        "• Search Boxes: Type two intersections (e.g., 'Don Mills & Sheppard'). Use the drop-down to lock them in, then click 'Find Route'\n"
+        "For autocomplete, enter two intersections; each intersection containing two partial street names seperated by '&' (eg. 'ed & un').\n"
+        "• Walk + Drive Mode: Toggle the switch to include walking. Set your walk speed and time limit in the provided boxes.\n"
+        "• Directions: A turn-by-turn navigation window will appear automatically when a route is found!\n\n"
+        
+        "🌙 VISUALS & DISPLAY\n"
+        "• Night Mode: Toggle the switch for a dark UI theme.\n"
+        "• Subway Lines: Colored transit lines and stations become visible as you zoom in.\n"
+        "• Map Switcher: Use the drop-down menu and 'Load Map' button to travel to different cities.\n"
+        "• POI Clusters: Points of Interest cluster together when zoomed out to prevent clutter, and reveal their names when zoomed in.\n\n"
+        
+        "🖱️ NAVIGATION\n"
+        "• Scroll Wheel: Zoom in and out.\n"
+        "• Left Click & Drag: Pan across the map.\n"
+        "• Zoom Fit: Instantly return to the full city view.\n"
+        "• Zoom Out: Step the camera back smoothly.";
+
+    // Inject text into the buffer
+    GtkTextBuffer* buf = gtk_text_view_get_buffer(GTK_TEXT_VIEW(text_view));
+    gtk_text_buffer_set_text(buf, help_text.c_str(), -1);
+
+    // Pack it all together
+    gtk_container_add(GTK_CONTAINER(scroll), text_view);
+    gtk_box_pack_start(GTK_BOX(gtk_dialog_get_content_area(GTK_DIALOG(active_help_dialog))), scroll, TRUE, TRUE, 0);
+
+    // Handle the close button safely
+    g_signal_connect(active_help_dialog, "response", G_CALLBACK(+[](GtkDialog* d, gint, gpointer) {
+        gtk_widget_destroy(GTK_WIDGET(d));
+        active_help_dialog = nullptr;
+    }), nullptr);
+
+    gtk_widget_show_all(active_help_dialog);
+}
+
 // Initial setup function to connect signals and prepare the application
 void initial_setup(ezgl::application* app, bool) {
   GtkWidget* find_btn = GTK_WIDGET(app->get_object("FindButton"));
 
-  
+  GtkWidget* help_btn = GTK_WIDGET(app->get_object("HelpButton"));
+  if (help_btn) {
+      g_signal_connect(help_btn, "clicked", G_CALLBACK(on_help_button_clicked), app);
+  }
 
   GtkWidget* mode_switch = GTK_WIDGET(app->get_object("ModeSwitch"));
   if (mode_switch) {
@@ -1952,7 +2050,7 @@ void draw_main_canvas(ezgl::renderer *g) {
     if (marker_radius < 15.0) marker_radius = 15.0;    // Minimum size
     if (marker_radius > 150.0) marker_radius = 150.0;  // Maximum size
 
-    // 1. Highlight the Start Intersection
+    // Highlight the Start Intersection
     if (start_intersection_id != -1) {
         ezgl::point2d start_center = {intersections[start_intersection_id].x, intersections[start_intersection_id].y};
         
@@ -1971,7 +2069,7 @@ void draw_main_canvas(ezgl::renderer *g) {
         g->draw_text({start_center.x, start_center.y + marker_radius + 30}, "START");
     }
 
-    // 2. Highlight the Destination Intersection
+    // Highlight the Destination Intersection
     if (dest_intersection_id != -1) {
         ezgl::point2d dest_center = {intersections[dest_intersection_id].x, intersections[dest_intersection_id].y};
         
@@ -1990,7 +2088,7 @@ void draw_main_canvas(ezgl::renderer *g) {
         g->draw_text({dest_center.x, dest_center.y + marker_radius + 30}, "DEST");
     }
 
-    // 3. Draw the Route
+    // Draw the Route
     if (!current_walk_route.empty()) {
         g->set_color(ezgl::color(100, 150, 255, 200)); // Lighter blue for walking
         g->set_line_width(4);
@@ -2014,7 +2112,7 @@ void draw_main_canvas(ezgl::renderer *g) {
         g->set_line_dash(ezgl::line_dash::none); // Reset dash so we don't break other lines
     }
 
-    // 3B. Draw the Driving Route (e.g., Solid Dark Blue)
+    // Draw the Driving Route (e.g., Solid Dark Blue)
     if (!current_drive_route.empty()) {
         g->set_color(ezgl::BLUE);
         g->set_line_width(3); 
