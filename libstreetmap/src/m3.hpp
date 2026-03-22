@@ -85,3 +85,4 @@ void initializePathfinding();
 
 // Clean up pathfinding data structures (called from closeMap)
 void cleanupPathfinding();
+

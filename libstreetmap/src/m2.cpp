@@ -906,7 +906,7 @@ static void attach_autocomplete(GtkEntry* entry, ezgl::application* app) {
   g_object_unref(completion);
 }
 
-void act_on_mouse_click(ezgl::application* app, GdkEventButton* event, double x, double y) {
+void act_on_mouse_click(ezgl::application* app, GdkEventButton* /*event*/, double x, double y) {
     // Convert the click x/y canvas coordinates back to LatLon using your helper functions
     float lat = latFromY(y);
     float lon = lonFromX(x);
