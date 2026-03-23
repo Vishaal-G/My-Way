@@ -98,6 +98,9 @@ float yFromLat(float lat);
 float lonFromX(float x);
 float latFromY(float y);
 
+ezgl::color findSubwayColour(std::string hex_str);
+void findMapFiles(); 
+
 // Internal Helpers
 bool ends_with(const std::string& text, const std::string& suffix);
 ezgl::color parse_hex_color(std::string hex_str);

@@ -63,7 +63,6 @@
 #include "m3.hpp"
 #include "tts.h"
 
-
 // Global UI State Variables
 IntersectionIdx start_intersection_id = -1;
 IntersectionIdx dest_intersection_id = -1;
