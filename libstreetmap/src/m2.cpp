@@ -53,6 +53,7 @@
 #include <sstream>
 #include <unordered_map>
 #include <unordered_set>
+#include <queue>
 
 // Header project files
 #include "ezgl/application.hpp"
@@ -406,7 +407,7 @@ static void on_route_button_clicked(GtkWidget*, gpointer data) {
 static bool is_night_mode = false;
 
 //Returns the colour that the subway lines should be 
-ezgl::color parse_hex_color(std::string hex_str) {
+ezgl::color findSubwayColour(std::string hex_str) {
   if (hex_str.empty()) return ezgl::color(0, 100, 200);
 
   //If given text for colour rather than hexcode 
@@ -441,50 +442,64 @@ ezgl::color parse_hex_color(std::string hex_str) {
 // Discover map files in the current directory and the provided maps directory,
 // and store their paths
 // Provides the list of map files in alphabetical order 
-void discover_map_paths() {
-  namespace fs = std::filesystem;
-  std::set<std::string> unique_paths;
-  discovered_map_paths.clear();
+void findMapFiles() {
+    namespace fs = std::filesystem;
+    std::set<std::string> unique_maps;
+    discovered_map_paths.clear();
 
-  auto add_maps_under = [&](const fs::path& root, int max_depth) {
-    std::error_code ec;
-    if (!fs::exists(root, ec)) return;
-    fs::recursive_directory_iterator it(
-        root, fs::directory_options::skip_permission_denied, ec);
-    fs::recursive_directory_iterator end;
-    while (it != end) {
-      if (ec) {
-        ec.clear();
-        it.increment(ec);
-        continue;
-      }
-      if (it.depth() > max_depth) {
-        it.disable_recursion_pending();
-        it.increment(ec);
-        continue;
-      }
-      if (it->is_regular_file(ec) && !ec) {
-        std::string path_str = it->path().string();
-        if (ends_with(path_str, ".streets.bin")) {
-          unique_paths.insert(path_str);
+    // Custom Breadth-First Search (BFS) directory traversal engine
+    auto bfs_search = [&](const std::string& root_dir, int max_depth) {
+        std::error_code ec;
+        if (!fs::exists(root_dir, ec)) return;
+
+        // The queue stores pairs of: {current_directory_path, current_depth_level}
+        std::queue<std::pair<fs::path, int>> search_queue;
+        search_queue.push({root_dir, 0});
+
+        while (!search_queue.empty()) {
+            auto [current_path, depth] = search_queue.front();
+            search_queue.pop();
+
+            // Open the directory, safely skipping folders we don't have permission to read
+            fs::directory_iterator dir_it(current_path, fs::directory_options::skip_permission_denied, ec);
+            if (ec) {
+                ec.clear();
+                continue; 
+            }
+
+            // Manually evaluate every item inside the current folder
+            for (const auto& entry : dir_it) {
+                if (entry.is_regular_file(ec)) {
+                    std::string filepath = entry.path().string();
+                    
+                    // Check if the file ends with the required map extension
+                    std::string target_ext = ".streets.bin";
+                    if (filepath.size() >= target_ext.size() && 
+                        filepath.compare(filepath.size() - target_ext.size(), target_ext.size(), target_ext) == 0) {
+                        unique_maps.insert(filepath);
+                    }
+                } 
+                // If it's a folder and we haven't hit our depth limit, queue it up for the next level
+                else if (entry.is_directory(ec) && depth < max_depth) {
+                    search_queue.push({entry.path(), depth + 1});
+                }
+            }
         }
-      }
-      it.increment(ec);
-    }
-  };
+    };
 
-  add_maps_under(fs::path("."), 4);
-  add_maps_under(fs::path("/cad2/ece297s/public/maps"), 2);
+    // Execute our custom search on both required directories
+    bfs_search(".", 4);
+    bfs_search("/cad2/ece297s/public/maps", 2);
 
-  discovered_map_paths.assign(unique_paths.begin(), unique_paths.end());
-  
-  std::sort(discovered_map_paths.begin(), discovered_map_paths.end(),
-            [](const std::string& a, const std::string& b) {
-              return std::filesystem::path(a).filename().string() <
-                     std::filesystem::path(b).filename().string();
-            });
+    // Transfer unique results to the global vector
+    discovered_map_paths.assign(unique_maps.begin(), unique_maps.end());
+
+    // Sort the final list alphabetically by filename only (ignoring the folder paths)
+    std::sort(discovered_map_paths.begin(), discovered_map_paths.end(),
+              [](const std::string& a, const std::string& b) {
+                  return fs::path(a).filename().string() < fs::path(b).filename().string();
+              });
 }
-
 
 void load_map_data() {
   //For highlighted intersections 
@@ -632,7 +647,7 @@ void load_map_data() {
     if (is_subway) {
       SubwayLine line;
       line.name = name;
-      line.color = parse_hex_color(hex_color); //Calls parse_hex_color to get the colour of the subway line 
+      line.color = findSubwayColour(hex_color); //Calls findSubwayColour to get the colour of the subway line 
 
       std::vector<TypedOSMID> members = getRelationMembers(rel);
       std::vector<std::string> roles = getRelationMemberRoles(rel); //role is the role of the subway (stop, station, platform)
@@ -1366,7 +1381,7 @@ void initial_setup(ezgl::application* app, bool) {
   }
 
   // Populate the map selection combo box with discovered maps
-  discover_map_paths();
+  findMapFiles();
   GtkComboBoxText* map_combo = GTK_COMBO_BOX_TEXT(app->get_object("MapCombo"));
   GtkWidget* load_map_btn = GTK_WIDGET(app->get_object("LoadMapButton"));
 
