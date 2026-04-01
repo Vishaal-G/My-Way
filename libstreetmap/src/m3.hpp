@@ -20,6 +20,8 @@
  */
 #pragma once
 
+#include "m2.hpp"
+#include "m1.hpp"
 #include "StreetsDatabaseAPI.h"
 #include <vector>
 #include <string>
@@ -79,10 +81,3 @@ findPathWithWalkToPickUp(
     const double turn_penalty,
     const double walking_speed,
     const double walking_time_limit);
-
-// Initialize pathfinding data structures (called from loadMap)
-void initializePathfinding();
-
-// Clean up pathfinding data structures (called from closeMap)
-void cleanupPathfinding();
-

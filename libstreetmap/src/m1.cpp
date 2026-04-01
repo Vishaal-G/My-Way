@@ -1,5 +1,6 @@
 #include "m1.hpp"
 #include "m3.hpp"
+#include "m3_globals.h"
 
 std::string cleanName(std::string name){
     std::string cleaned; 

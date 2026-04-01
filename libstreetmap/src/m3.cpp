@@ -8,8 +8,8 @@
  * - Finding shortest paths between intersections
  * - Multi-modal pathfinding (walk + drive)
  */
-
 #include "m3.h"
+#include "m3_globals.h" // <-- YOU MUST INCLUDE THIS!
 
 #include <algorithm>
 #include <cmath>
@@ -21,105 +21,56 @@
 #include "StreetsDatabaseAPI.h"
 #include "m1.h"
 
-// Constants
-constexpr StreetSegmentIdx NO_EDGE = -1;
-constexpr IntersectionIdx NO_INTERSECTION = -1;
-constexpr StreetIdx NO_STREET = -1;
-static double maxSpeedLimit = 0.0;
-
-// Helper functions (optional - can be kept internal to m3.cpp)
+// Helper functions (Internal to m3.cpp)
 void resetNodes();
-void clearWavefront();
-void initializePathfinding();
-void cleanupPathfinding();
 double computeHeuristic(IntersectionIdx current, IntersectionIdx dest);
-std::vector<StreetSegmentIdx> tracePath(IntersectionIdx src,
-                                        IntersectionIdx dest);
+std::vector<StreetSegmentIdx> tracePath(IntersectionIdx src, IntersectionIdx dest);
 
-static std::vector<double> segmentWalkingLengths;
-static std::vector<LatLon> intersectionPositions;
-static std::vector<StreetSegmentInfo> segmentInfos;
-static std::vector<std::vector<StreetSegmentIdx>> intersectionSegments;
+// --- GLOBAL VARIABLES (Notice there is NO 'static' keyword!) ---
+double maxSpeedLimit = 0.0;
+std::vector<double> segmentWalkingLengths;
+std::vector<LatLon> intersectionPositions;
+std::vector<StreetSegmentInfo> segmentInfos;
+std::vector<std::vector<StreetSegmentIdx>> intersectionSegments;
+std::vector<IntersectionIdx> touchedDriveNodes;
+std::vector<IntersectionIdx> touchedWalkNodes;
+std::vector<Node> walkNodes;
+std::vector<Node> nodes;
+std::priority_queue<WaveElem, std::vector<WaveElem>, CompareWaveElem> wavefront;
+std::vector<double> segmentTravelTimes;
 
-// Add this global alongside the others
-static std::vector<IntersectionIdx> touchedDriveNodes;
-static std::vector<IntersectionIdx> touchedWalkNodes;
+// --- YOUR FUNCTIONS START HERE ---
 
-// Data Structures for Pathfinding
-struct WaveElem {
-  IntersectionIdx nodeID; //The IntersectionIdx that it is on 
-  StreetSegmentIdx edgeID;  //Street segment used to reach this node
-  double travelTime;        //Time to reach this node from start
-
-//Constructor 
-  WaveElem(IntersectionIdx node, StreetSegmentIdx edge, double time)
-      : nodeID(node), edgeID(edge), travelTime(time) {}
-};
-
-// Comparator for priority queue (min-heap based on travel time)
-//Puts the lowest travel time to the top of wavefront 
-struct CompareWaveElem {
-  bool operator()(const WaveElem& a, const WaveElem& b) const {
-    return a.travelTime > b.travelTime;  // Min-heap
-  }
-};
-
-// Node information for pathfinding
-struct Node {
-  double bestTime;                // Best time to reach this node
-  StreetSegmentIdx reachingEdge;  // Edge used to reach this node
-  bool visited;                   // Whether node has been visited
-
-  Node()
-      : bestTime(std::numeric_limits<double>::infinity()),
-        reachingEdge(NO_EDGE),
-        visited(false) {}
-};
-
-// Separate node storage for walk and drive phases
-static std::vector<Node> walkNodes;  // add this global alongside `nodes`
-// Global data structures for pathfinding (reused across calls)
-static std::vector<Node> nodes;
-//Represents all the intersections just discovered, but havent explored yet 
-static std::priority_queue<WaveElem, std::vector<WaveElem>, CompareWaveElem>
-    wavefront;
-
-// Precomputed segment travel times (computed once in loadMap)
-static std::vector<double> segmentTravelTimes;
-
-// Helper functions
 
 // Initialize pathfinding data structures
 void initializePathfinding() {
-  //Get how many intersections exist in total,then initialize the vectors to hold that many items
   int numIntersections = getNumIntersections();
   nodes.resize(numIntersections);
   walkNodes.resize(numIntersections);
   touchedDriveNodes.reserve(numIntersections);
   touchedWalkNodes.reserve(numIntersections);
   intersectionSegments.resize(numIntersections);
-
-  //Cache the positions of each intersections 
   intersectionPositions.resize(numIntersections);
+
+  // Precompute intersection positions and segments
   for (int i = 0; i < numIntersections; i++) {
     intersectionPositions[i] = getIntersectionPosition(i);
     intersectionSegments[i] = findStreetSegmentsOfIntersection(i);
   }
 
-//Get # of street segments and initlize vectors to hold that many items 
+  // Precompute segment travel times and walking lengths
   int numSegments = getNumStreetSegments();
   segmentTravelTimes.resize(numSegments);
   segmentWalkingLengths.resize(numSegments);
   segmentInfos.resize(numSegments);
 
+  // Also find max speed limit for heuristic
   for (int i = 0; i < numSegments; i++) {
-    StreetSegmentInfo info = getStreetSegmentInfo(i);//Get each street segments info (speed limit, one way, to/from)
+    StreetSegmentInfo info = getStreetSegmentInfo(i);
     segmentInfos[i] = info;
     double length = findStreetSegmentLength(i);
-    //Store that information 
     segmentTravelTimes[i] = length / info.speedLimit;
     segmentWalkingLengths[i] = length;
-    //Hold the maximum speed limit 
     if (info.speedLimit > maxSpeedLimit) maxSpeedLimit = info.speedLimit;
   }
 }
@@ -201,17 +152,16 @@ std::vector<StreetSegmentIdx> tracePath(IntersectionIdx src,
 }
 
 // Compute travel time for a given path (driving)
-//Takes time penalty for making a turn & vectory containing ordered sequence of street segments that make up the route 
 double computePathTravelTime(const double turn_penalty,
                              const std::vector<StreetSegmentIdx>& path) {
   if (path.empty()) return 0.0;
 
   double totalTime = 0.0;
-  StreetIdx prevStreet = NO_STREET; //Stores ID of street you were just on 
+  StreetIdx prevStreet = NO_STREET;
 
   for (StreetSegmentIdx segID : path) {
     // Add segment travel time
-    totalTime += segmentTravelTimes[segID]; //Uses precomputed segmentTravelTime in initializePathfinding() 
+    totalTime += segmentTravelTimes[segID];
 
     // Check for turn
     StreetIdx currentStreet = segmentInfos[segID].streetID;
@@ -261,11 +211,9 @@ std::vector<StreetSegmentIdx> findPathBetweenIntersections(
   IntersectionIdx src = intersect_ids.first;
   IntersectionIdx dest = intersect_ids.second;
 
-//If the same intersection is clicked 
   if (src == dest) return std::vector<StreetSegmentIdx>();
 
   // Dirty reset — only clear nodes touched last call
-  //Only resets the time for the intersections that the last search touched 
   for (IntersectionIdx idx : touchedDriveNodes) {
     nodes[idx].bestTime = std::numeric_limits<double>::infinity();
     nodes[idx].reachingEdge = NO_EDGE;
@@ -279,17 +227,15 @@ std::vector<StreetSegmentIdx> findPathBetweenIntersections(
   touchedDriveNodes.push_back(src);
   wavefront.push(WaveElem(src, NO_EDGE, 0.0));
 
+  // A* Search
   while (!wavefront.empty()) {
-    //Take the lowest estimated time from wavefront 
     WaveElem current = wavefront.top();
     wavefront.pop();
 
-    //If the current node is already visited, skip it 
     IntersectionIdx currNode = current.nodeID;
     if (nodes[currNode].visited) continue;
     nodes[currNode].visited = true;
 
-    //If the node just popped is the destination, trace from the src to destination using reachingEdge to get final route 
     if (currNode == dest) {
       // Trace path using nodes[]
       std::vector<StreetSegmentIdx> path;
@@ -305,15 +251,16 @@ std::vector<StreetSegmentIdx> findPathBetweenIntersections(
       return path;
     }
 
-    //Is there a turn on the next step 
+    // Determine current street for turn penalty calculation
     StreetIdx currentStreet = NO_STREET;
     if (current.edgeID != NO_EDGE)
       currentStreet = segmentInfos[current.edgeID].streetID;
 
-    //Is the street a one way 
+    // Explore neighbors
     for (StreetSegmentIdx segID : intersectionSegments[currNode]) {
       const StreetSegmentInfo& info = segmentInfos[segID];
 
+      // Determine neighbor intersection based on directions
       IntersectionIdx neighbor = NO_INTERSECTION;
       if (info.from == currNode)
         neighbor = info.to;
@@ -322,7 +269,7 @@ std::vector<StreetSegmentIdx> findPathBetweenIntersections(
       else
         continue;
 
-      //Gets pre calculated driving time and adds if there is turn 
+      // Calculate new time to neighbor
       double edgeTime = segmentTravelTimes[segID];
       double turnTime =
           (currentStreet != NO_STREET && currentStreet != info.streetID)
@@ -330,17 +277,14 @@ std::vector<StreetSegmentIdx> findPathBetweenIntersections(
               : 0.0;
       double newTime = nodes[currNode].bestTime + edgeTime + turnTime;
 
-      //Is the new route better than any route 
       if (newTime < nodes[neighbor].bestTime) {
         // Only track first time we discover this node
         if (nodes[neighbor].bestTime == std::numeric_limits<double>::infinity())
           touchedDriveNodes.push_back(neighbor);
         nodes[neighbor].bestTime = newTime;
         nodes[neighbor].reachingEdge = segID;
-        //Calculate the priority of the neighbour intersection 
-        //Past time + Future time (staight line)
         double priority = newTime + computeHeuristic(neighbor, dest);
-        wavefront.push(WaveElem(neighbor, segID, priority)); 
+        wavefront.push(WaveElem(neighbor, segID, priority));
       }
     }
   }
@@ -358,8 +302,7 @@ findPathWithWalkToPickUp(const IntersectionIdx start_intersection,
       result;
   if (start_intersection == end_intersection) return result;
 
-  //Walking Dijkstra — dirty-reset only touched walkNodes
-
+  // Walking Dijkstra - dirty reset only touched the walkNodes
   for (IntersectionIdx idx : touchedWalkNodes) {
     walkNodes[idx].bestTime = std::numeric_limits<double>::infinity();
     walkNodes[idx].reachingEdge = NO_EDGE;
@@ -368,22 +311,26 @@ findPathWithWalkToPickUp(const IntersectionIdx start_intersection,
   touchedWalkNodes.clear();
   clearWavefront();
 
+  // Initialize walking source
   walkNodes[start_intersection].bestTime = 0.0;
   touchedWalkNodes.push_back(start_intersection);
   wavefront.push(WaveElem(start_intersection, NO_EDGE, 0.0));
 
-  std::vector<IntersectionIdx> reachablePickups;
+  std::vector<IntersectionIdx>
+      reachablePickups;  // Intersections reachable by walking within time limit
 
+  // Dijkstra for walking to find reachable pickup points within time limit
   while (!wavefront.empty()) {
     WaveElem current = wavefront.top();
     wavefront.pop();
 
+    // Skip if already visited or exceeds walking time limit
     IntersectionIdx currNode = current.nodeID;
     if (walkNodes[currNode].visited) continue;
     walkNodes[currNode].visited = true;
 
     double walkTime = walkNodes[currNode].bestTime;
-    if (walkTime > walking_time_limit) continue;
+    if (walkTime > walking_time_limit) continue;  // Exceeds walking time limit
 
     reachablePickups.push_back(currNode);
 
@@ -391,6 +338,7 @@ findPathWithWalkToPickUp(const IntersectionIdx start_intersection,
     if (current.edgeID != NO_EDGE)
       currentStreet = segmentInfos[current.edgeID].streetID;
 
+    // Explore neighbors for walking
     for (StreetSegmentIdx segID : intersectionSegments[currNode]) {
       const StreetSegmentInfo& info = segmentInfos[segID];
       IntersectionIdx neighbor = (info.from == currNode) ? info.to : info.from;
@@ -415,8 +363,7 @@ findPathWithWalkToPickUp(const IntersectionIdx start_intersection,
     }
   }
 
-  //Multi-Source A* driving — dirty-reset only touched driveNodes
-
+  // Multi-Source A* driving - dirty-reset only touched the driveNodes
   for (IntersectionIdx idx : touchedDriveNodes) {
     nodes[idx].bestTime = std::numeric_limits<double>::infinity();
     nodes[idx].reachingEdge = NO_EDGE;
@@ -425,6 +372,7 @@ findPathWithWalkToPickUp(const IntersectionIdx start_intersection,
   touchedDriveNodes.clear();
   clearWavefront();
 
+  // Initialize wavefront with all reachable pickup points
   for (IntersectionIdx pickup : reachablePickups) {
     if (nodes[pickup].bestTime == std::numeric_limits<double>::infinity())
       touchedDriveNodes.push_back(pickup);
@@ -434,6 +382,7 @@ findPathWithWalkToPickUp(const IntersectionIdx start_intersection,
     wavefront.push(WaveElem(pickup, NO_EDGE, priority));
   }
 
+  // A* Search from all reachable pickup points to destination
   while (!wavefront.empty()) {
     WaveElem current = wavefront.top();
     wavefront.pop();
@@ -448,9 +397,11 @@ findPathWithWalkToPickUp(const IntersectionIdx start_intersection,
     if (current.edgeID != NO_EDGE)
       currentStreet = segmentInfos[current.edgeID].streetID;
 
+    // Explore neighbors for driving
     for (StreetSegmentIdx segID : intersectionSegments[currNode]) {
       const StreetSegmentInfo& info = segmentInfos[segID];
 
+      // Determine neighbor intersection based on directions
       IntersectionIdx neighbor = NO_INTERSECTION;
       if (info.from == currNode)
         neighbor = info.to;
@@ -459,6 +410,7 @@ findPathWithWalkToPickUp(const IntersectionIdx start_intersection,
       else
         continue;
 
+      // Calculate new time to neighbor
       double edgeTime = segmentTravelTimes[segID];
       double turnTime =
           (currentStreet != NO_STREET && currentStreet != info.streetID)
@@ -474,17 +426,17 @@ findPathWithWalkToPickUp(const IntersectionIdx start_intersection,
         nodes[neighbor].reachingEdge = segID;
         double priority =
             newTime + computeHeuristic(neighbor, end_intersection);
-        wavefront.push(WaveElem(neighbor, segID, priority); 
+        wavefront.push(WaveElem(neighbor, segID, priority));
       }
     }
   }
 
-  //Reconstruct paths (unchanged from before)
-
+  // Reconstruct paths (unchanged from before)
   if (nodes[end_intersection].bestTime ==
       std::numeric_limits<double>::infinity())
     return result;
 
+  // Trace driving path from destination back to best pickup point
   std::vector<StreetSegmentIdx> drivingPath;
   IntersectionIdx tracer = end_intersection;
   while (nodes[tracer].reachingEdge != NO_EDGE) {
@@ -497,6 +449,7 @@ findPathWithWalkToPickUp(const IntersectionIdx start_intersection,
   std::reverse(drivingPath.begin(), drivingPath.end());
   result.second = drivingPath;
 
+  // Trace walking path from best pickup point back to start
   std::vector<StreetSegmentIdx> walkPath;
   IntersectionIdx walkTracer = bestPickup;
   while (walkTracer != start_intersection) {
