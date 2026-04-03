@@ -174,9 +174,9 @@ bool loadMap(std::string map_streets_database_filename) {
     for (size_t i = 0; i < street_to_intersections.size(); i++) { 
 
         // Removing duplicate intersections in the vector
-        std::vector<IntersectionIdx> &intersections= street_to_intersections[i];
-        std::sort(intersections.begin(), intersections.end()); // Sort all streets so duplicates are next to eachother
-        intersections.erase(std::unique(intersections.begin(), intersections.end()), intersections.end()); // Deletes streets that are not duplicates
+        std::vector<IntersectionIdx> &street_intersections= street_to_intersections[i];
+        std::sort(street_intersections.begin(), street_intersections.end()); // Sort all streets so duplicates are next to eachother
+        street_intersections.erase(std::unique(street_intersections.begin(), street_intersections.end()), street_intersections.end()); // Deletes streets that are not duplicates
     }
 
     //For findWayLength & getOSMNodeTagValue 

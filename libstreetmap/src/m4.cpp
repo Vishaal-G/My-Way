@@ -21,6 +21,19 @@ struct POI_Data {
   std::vector<StreetSegmentIdx> path;
 };
 
+std::vector<IntersectionIdx> getUniquePOIs(const std::vector<DeliveryInf>& deliveries, const std::vector<IntersectionIdx>& depots);
+
+std::unordered_map<IntersectionIdx, POI_Data> multiTargetDijkstra(IntersectionIdx start_node, const std::vector<IntersectionIdx>& all_pois, float turn_penalty);
+
+void buildTravelCache(const std::vector<DeliveryInf>& deliveries, const std::vector<IntersectionIdx>& depots, float turn_penalty);
+
+double calculateRouteTime(const std::vector<IntersectionIdx>& route_sequence);
+
+std::vector<IntersectionIdx> generateGreedyRoute(IntersectionIdx start_depot, const std::vector<DeliveryInf>& deliveries, const std::vector<IntersectionIdx>& depots);
+
+bool isLegalRoute(const std::vector<IntersectionIdx>& test_route, const std::vector<DeliveryInf>& deliveries);
+
+
 // Global Cache: cache[source_intersection][dest_intersection]
 std::unordered_map<IntersectionIdx,
                    std::unordered_map<IntersectionIdx, POI_Data>>
