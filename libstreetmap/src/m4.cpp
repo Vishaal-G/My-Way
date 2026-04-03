@@ -173,3 +173,15 @@ void buildTravelCache(const std::vector<DeliveryInf>& deliveries,
         multiTargetDijkstra(start_poi, all_pois, turn_penalty);
   }
 }
+
+// Helper function to calculate total travel time for a given route sequence
+double calculateRouteTime(const std::vector<IntersectionIdx>& route_sequence) {
+  double total_time = 0.0;
+  for (size_t i = 0; i < route_sequence.size() - 1; ++i) {
+    IntersectionIdx from = route_sequence[i];
+    IntersectionIdx to = route_sequence[i + 1];
+    total_time += travel_cache[from][to].travel_time;
+  }
+  return total_time;
+}
+
