@@ -185,3 +185,129 @@ double calculateRouteTime(const std::vector<IntersectionIdx>& route_sequence) {
   return total_time;
 }
 
+// Helper function to calculate a route starting from a specific depot
+std::vector<IntersectionIdx> generateGreedyRoute(
+    IntersectionIdx start_depot, const std::vector<DeliveryInf>& deliveries,
+    const std::vector<IntersectionIdx>& depots) {
+  std::vector<IntersectionIdx> route;
+  route.push_back(start_depot);
+
+  int N = deliveries.size();
+  std::vector<bool> picked_up(N, false);
+  std::vector<bool> dropped_off(N, false);
+  int deliveries_completed = 0;
+
+  IntersectionIdx current_node = start_depot;
+
+  // Greedy Loop: at each step, pick the closest next pickup or dropoff
+  while (deliveries_completed < N) {
+    double best_time = std::numeric_limits<double>::infinity();
+    IntersectionIdx best_next_node = NO_INTERSECTION;
+    int best_delivery_index = -1;
+    bool is_pickup_move = false;
+
+    // Check all possible next moves (pickups and dropoffs)
+    for (int i = 0; i < N; ++i) {
+      if (!picked_up[i]) {
+        IntersectionIdx candidate = deliveries[i].pickUp;
+
+        // Safely check if a path actually exists in the cache
+        auto it = travel_cache[current_node].find(candidate);
+        if (it != travel_cache[current_node].end()) {
+          double time = it->second.travel_time;
+          if (time < best_time) {
+            best_time = time;
+            best_next_node = candidate;
+            best_delivery_index = i;
+            is_pickup_move = true;
+          }
+        }
+      } else if (picked_up[i] && !dropped_off[i]) {
+        IntersectionIdx candidate = deliveries[i].dropOff;
+
+        // Safely check if a path actually exists in the cache
+        auto it = travel_cache[current_node].find(candidate);
+        if (it != travel_cache[current_node].end()) {
+          double time = it->second.travel_time;
+          if (time < best_time) {
+            best_time = time;
+            best_next_node = candidate;
+            best_delivery_index = i;
+            is_pickup_move = false;
+          }
+        }
+      }
+    }
+
+    // If we can't find any valid next move we must fail gracefully
+    if (best_delivery_index == -1) {
+      return std::vector<IntersectionIdx>();  // Return an empty, failed route
+    }
+
+    if (is_pickup_move)
+      picked_up[best_delivery_index] = true;
+    else {
+      dropped_off[best_delivery_index] = true;
+      deliveries_completed++;
+    }
+
+    if (best_next_node != current_node) {
+      route.push_back(best_next_node);
+      current_node = best_next_node;
+    }
+  }
+
+  // Find closest end depot
+  double best_depot_time = std::numeric_limits<double>::infinity();
+  IntersectionIdx best_end_depot = NO_INTERSECTION;
+
+  for (IntersectionIdx depot : depots) {
+    auto it = travel_cache[current_node].find(depot);
+    if (it != travel_cache[current_node].end()) {
+      double time = it->second.travel_time;
+      if (time < best_depot_time) {
+        best_depot_time = time;
+        best_end_depot = depot;
+      }
+    }
+  }
+
+  // Ensure we found a valid end depot before adding it to the route
+  if (best_end_depot == NO_INTERSECTION) return std::vector<IntersectionIdx>();
+
+  if (best_end_depot != current_node) {
+    route.push_back(best_end_depot);
+  }
+
+  return route;
+}
+
+bool isLegalRoute(const std::vector<IntersectionIdx>& test_route,
+                  const std::vector<DeliveryInf>& deliveries) {
+  // Check that for every delivery, the pickup happens before the dropoff in the
+  // route.
+  std::unordered_map<IntersectionIdx, int> positions;
+
+  // First, record the position of each intersection in the route
+  for (int i = 0; i < test_route.size(); ++i) {
+    IntersectionIdx current_node = test_route[i];
+    if (positions.find(current_node) == positions.end()) {
+      positions[current_node] = i;
+    }
+  }
+
+  // Now check each delivery against the positions
+  for (const auto& delivery : deliveries) {
+    int pickup_pos = positions[delivery.pickUp];
+    int dropoff_pos = positions[delivery.dropOff];
+
+    // If either the pickup or dropoff is missing from the route, it's illegal
+    if (dropoff_pos <= pickup_pos) {
+      if (delivery.pickUp != delivery.dropOff) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
