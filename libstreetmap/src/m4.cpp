@@ -150,3 +150,26 @@ std::unordered_map<IntersectionIdx, POI_Data> multiTargetDijkstra(
 
   return found_paths;
 }
+
+void buildTravelCache(const std::vector<DeliveryInf>& deliveries,
+                      const std::vector<IntersectionIdx>& depots,
+                      const float turn_penalty) {
+  travel_cache.clear();
+
+  // Get unique POIs
+  std::vector<IntersectionIdx> all_pois = getUniquePOIs(deliveries, depots);
+
+  // Setup the fast O(1) POI checker
+  int num_intersections = getNumIntersections();
+  is_poi.assign(num_intersections, false);
+  for (IntersectionIdx poi : all_pois) {
+    is_poi[poi] = true;
+  }
+
+  // Flood the map from every POI
+  for (int i = 0; i < all_pois.size(); i++) {
+    IntersectionIdx start_poi = all_pois[i];
+    travel_cache[start_poi] =
+        multiTargetDijkstra(start_poi, all_pois, turn_penalty);
+  }
+}
