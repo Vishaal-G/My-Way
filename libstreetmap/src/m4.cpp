@@ -21,6 +21,19 @@ struct POI_Data {
   std::vector<StreetSegmentIdx> path;
 };
 
+std::vector<IntersectionIdx> getUniquePOIs(const std::vector<DeliveryInf>& deliveries, const std::vector<IntersectionIdx>& depots);
+
+std::unordered_map<IntersectionIdx, POI_Data> multiTargetDijkstra(IntersectionIdx start_node, const std::vector<IntersectionIdx>& all_pois, float turn_penalty);
+
+void buildTravelCache(const std::vector<DeliveryInf>& deliveries, const std::vector<IntersectionIdx>& depots, float turn_penalty);
+
+double calculateRouteTime(const std::vector<IntersectionIdx>& route_sequence);
+
+std::vector<IntersectionIdx> generateGreedyRoute(IntersectionIdx start_depot, const std::vector<DeliveryInf>& deliveries, const std::vector<IntersectionIdx>& depots);
+
+bool isLegalRoute(const std::vector<IntersectionIdx>& test_route, const std::vector<DeliveryInf>& deliveries);
+
+
 // Global Cache: cache[source_intersection][dest_intersection]
 std::unordered_map<IntersectionIdx,
                    std::unordered_map<IntersectionIdx, POI_Data>>
@@ -310,3 +323,108 @@ bool isLegalRoute(const std::vector<IntersectionIdx>& test_route,
 
   return true;
 }
+
+std::vector<CourierSubPath> travelingCourier(
+    const float turn_penalty, const std::vector<DeliveryInf>& deliveries,
+    const std::vector<IntersectionIdx>& depots) {
+  // Start the master clock
+  auto start_time = std::chrono::high_resolution_clock::now();
+
+  // Build the travel cache
+  buildTravelCache(deliveries, depots, turn_penalty);
+
+  // Try a greedy route from each depot
+  std::vector<IntersectionIdx> best_route_sequence;
+  double best_route_time = std::numeric_limits<double>::infinity();
+
+  // Generate a route starting from each depot, and keep the best one
+  for (IntersectionIdx start_depot : depots) {
+    std::vector<IntersectionIdx> current_route =
+        generateGreedyRoute(start_depot, deliveries, depots);
+
+    // Check if we got a valid route back before comparing times
+    if (!current_route.empty()) {
+      double current_time = calculateRouteTime(current_route);
+      if (current_time < best_route_time) {
+        best_route_time = current_time;
+        best_route_sequence = current_route;
+      }
+    }
+  }
+
+  std::srand(
+      8675309);  // Seed the random number generator so bugs are reproducible
+
+  double time_limit = 48.0;
+  if (deliveries.size() <= 5) {
+    time_limit = 0.5;
+  } else if (deliveries.size() <= 30) {
+    time_limit = 5.0;
+  }
+
+  while (true) {
+    // Check the clock
+    auto current_time = std::chrono::high_resolution_clock::now();
+    auto elapsed_seconds = std::chrono::duration_cast<std::chrono::seconds>(
+                               current_time - start_time)
+                               .count();
+
+    // If we've hit our time limit, stop iterating
+    if (elapsed_seconds >= time_limit) {
+      break;
+    }
+
+    // Clone the route so we can mess with it
+    std::vector<IntersectionIdx> test_route = best_route_sequence;
+
+    // Pick two random stops to swap.
+    int max_index = test_route.size() - 2;
+    if (max_index <= 1) break;  // Route is too small to swap anything
+
+    int swap_idx1 = 1 + std::rand() % max_index;
+    int swap_idx2 = 1 + std::rand() % max_index;
+
+    // Perform the swap
+    std::swap(test_route[swap_idx1], test_route[swap_idx2]);
+
+    // Test the mutated route
+    if (isLegalRoute(test_route, deliveries)) {
+      double test_time = calculateRouteTime(test_route);  // O(N) fast lookup
+
+      // If it's better than our best, keep it
+      if (test_time < best_route_time) {
+        best_route_sequence = test_route;
+        best_route_time = test_time;
+      }
+    }
+  }
+
+  std::vector<CourierSubPath> final_result;
+
+  // Return empty if no valid route was found
+  if (best_route_sequence.empty()) {
+    return final_result;
+  }
+
+  // Iterate through our optimized sequence, one leg at a time
+  for (size_t i = 0; i < best_route_sequence.size() - 1; ++i) {
+    IntersectionIdx start_poi = best_route_sequence[i];
+    IntersectionIdx end_poi = best_route_sequence[i + 1];
+
+    CourierSubPath current_subpath;
+
+    // Log the start and end of this leg
+    current_subpath.intersections = std::make_pair(start_poi, end_poi);
+
+    // Grab the actual street driving directions from our Phase 1 Matrix
+    current_subpath.subpath = travel_cache[start_poi][end_poi].path;
+
+    // Add this leg to the final route
+    final_result.push_back(current_subpath);
+  }
+
+  // Return the final route
+  return final_result;
+}
+
+
