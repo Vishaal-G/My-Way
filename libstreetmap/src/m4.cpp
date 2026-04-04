@@ -125,7 +125,7 @@ std::unordered_map<IntersectionIdx, POI_Data> multiTargetDijkstra(
       else if (!info.oneWay)
         neighbor = info.from;
       else
-        continue;  // Obey one-way streets
+        continue;  // For one way streets
 
       double edgeTime = segmentTravelTimes[segID];
       double turnTime =
@@ -159,7 +159,7 @@ void buildTravelCache(const std::vector<DeliveryInf>& deliveries,
   // Get unique POIs
   std::vector<IntersectionIdx> all_pois = getUniquePOIs(deliveries, depots);
 
-  // Setup the fast O(1) POI checker
+  // Setup the fast POI checker, should be O(1) 
   int num_intersections = getNumIntersections();
   is_poi.assign(num_intersections, false);
   for (IntersectionIdx poi : all_pois) {
@@ -199,7 +199,7 @@ std::vector<IntersectionIdx> generateGreedyRoute(
 
   IntersectionIdx current_node = start_depot;
 
-  // Greedy Loop: at each step, pick the closest next pickup or dropoff
+  // Greedy Loop, at each step, pick the closest next pickup or dropoff
   while (deliveries_completed < N) {
     double best_time = std::numeric_limits<double>::infinity();
     IntersectionIdx best_next_node = NO_INTERSECTION;
@@ -239,7 +239,7 @@ std::vector<IntersectionIdx> generateGreedyRoute(
       }
     }
 
-    // If we can't find any valid next move we must fail gracefully
+    // If we can't find any valid next move we must fail 
     if (best_delivery_index == -1) {
       return std::vector<IntersectionIdx>();  // Return an empty, failed route
     }
@@ -284,8 +284,7 @@ std::vector<IntersectionIdx> generateGreedyRoute(
 
 bool isLegalRoute(const std::vector<IntersectionIdx>& test_route,
                   const std::vector<DeliveryInf>& deliveries) {
-  // Check that for every delivery, the pickup happens before the dropoff in the
-  // route.
+  // Check that for every delivery, the pickup happens before the dropoff in the route.
   std::unordered_map<IntersectionIdx, int> positions;
 
   // First, record the position of each intersection in the route

@@ -5,12 +5,12 @@
 #include <limits>
 #include "StreetsDatabaseAPI.h"
 
-// --- 1. Constants ---
+//Constants 
 constexpr StreetSegmentIdx NO_EDGE = -1;
 constexpr IntersectionIdx NO_INTERSECTION = -1;
 constexpr StreetIdx NO_STREET = -1;
 
-// --- 2. Data Structures ---
+//Data Structures 
 struct WaveElem {
   IntersectionIdx nodeID;
   StreetSegmentIdx edgeID;  
@@ -37,7 +37,7 @@ struct Node {
         visited(false) {}
 };
 
-// --- 3. Shared Global Variables (Extern) ---
+//Shared Global Variables 
 extern double maxSpeedLimit;
 extern std::vector<double> segmentWalkingLengths;
 extern std::vector<LatLon> intersectionPositions;
@@ -50,7 +50,7 @@ extern std::vector<Node> nodes;
 extern std::priority_queue<WaveElem, std::vector<WaveElem>, CompareWaveElem> wavefront;
 extern std::vector<double> segmentTravelTimes;
 
-// --- 4. Shared Function Prototypes ---
+//Shared Functions 
 void clearWavefront();
 void initializePathfinding();
 void cleanupPathfinding();
