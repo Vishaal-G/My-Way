@@ -1,430 +1,366 @@
-#include <algorithm>
-#include <chrono>
-#include <limits>
-#include <queue>
-#include <unordered_map>
-#include <vector>
-
-#include "m3.h"
-#include "m3_globals.h"
 #include "m4.h"
+#include "m3.h"           // Needed for findPathBetweenIntersections
+#include "m3_globals.h"  
+#include <limits>
+#include <vector>
+#include <unordered_map>
+#include <chrono>
+#include <thread>
+#include <future>
+#include <random>
+#include <cmath>
+#include <algorithm>
+#include <iostream>
 
-extern std::vector<IntersectionIdx> touchedDriveNodes;
-extern std::vector<Node> nodes;
-extern std::vector<StreetSegmentInfo> segmentInfos;
-extern std::vector<double> segmentTravelTimes;
-extern std::vector<std::vector<StreetSegmentIdx>> intersectionSegments;
+//Data structures and globals 
 
-// Data Structures
-struct POI_Data {
-  double travel_time;
-  std::vector<StreetSegmentIdx> path;
+// Replace your old Route struct with this:
+struct Route {
+    std::vector<int> sequence;      // Stores Action IDs (0 to 2D+1)
+    std::vector<int> action_to_poi; // Maps Action ID -> Dense POI index
+    double total_travel_time = 0.0;
 };
 
-std::vector<IntersectionIdx> getUniquePOIs(const std::vector<DeliveryInf>& deliveries, const std::vector<IntersectionIdx>& depots);
+// Fast mappings between physical intersections and our dense 0 to K-1 matrix indices
+std::unordered_map<IntersectionIdx, int> intersection_to_poi;
+std::vector<IntersectionIdx> poi_to_intersection;
 
-std::unordered_map<IntersectionIdx, POI_Data> multiTargetDijkstra(IntersectionIdx start_node, const std::vector<IntersectionIdx>& all_pois, float turn_penalty);
-
-void buildTravelCache(const std::vector<DeliveryInf>& deliveries, const std::vector<IntersectionIdx>& depots, float turn_penalty);
-
-double calculateRouteTime(const std::vector<IntersectionIdx>& route_sequence);
-
-std::vector<IntersectionIdx> generateGreedyRoute(IntersectionIdx start_depot, const std::vector<DeliveryInf>& deliveries, const std::vector<IntersectionIdx>& depots);
-
-bool isLegalRoute(const std::vector<IntersectionIdx>& test_route, const std::vector<DeliveryInf>& deliveries);
+//Lookup matrix: dense_cost_matrix[source_poi][dest_poi] O(1) 
+std::vector<std::vector<double>> dense_cost_matrix;
 
 
-// Global Cache: cache[source_intersection][dest_intersection]
-std::unordered_map<IntersectionIdx,
-                   std::unordered_map<IntersectionIdx, POI_Data>>
-    travel_cache;
+//Matrix and dependency builders 
 
-static std::vector<bool> is_poi;
+void buildCostMatrix(const std::vector<DeliveryInf>& deliveries, const std::vector<IntersectionIdx>& depots, float turn_penalty) {
+    // Collect all unique POIs
+    std::vector<IntersectionIdx> unique_pois;
+    for (const auto& dep : depots) unique_pois.push_back(dep);
+    for (const auto& del : deliveries) {
+        unique_pois.push_back(del.pickUp);
+        unique_pois.push_back(del.dropOff);
+    }
+    
+    // Sort and remove duplicates to create dense indexing
+    std::sort(unique_pois.begin(), unique_pois.end());
+    unique_pois.erase(std::unique(unique_pois.begin(), unique_pois.end()), unique_pois.end());
+    
+    int num_pois = unique_pois.size();
+    poi_to_intersection = unique_pois;
+    
+    intersection_to_poi.clear();
+    for (int i = 0; i < num_pois; ++i) {
+        intersection_to_poi[unique_pois[i]] = i;
+    }
+    
+    // Allocate matrix
+    dense_cost_matrix.assign(num_pois, std::vector<double>(num_pois, std::numeric_limits<double>::infinity()));
+    int total_intersections = getNumIntersections(); 
 
-// Helper to track cargo
-struct DeliveryState {
-  std::vector<bool> picked_up;
-  std::vector<bool> dropped_off;
-  int total_deliveries;
-  int deliveries_completed = 0;
-};
+    // Multi-Target Dijkstra
+    for (int i = 0; i < num_pois; ++i) {
+        IntersectionIdx start_node = poi_to_intersection[i];
+        
+        std::vector<double> best_times(total_intersections, std::numeric_limits<double>::infinity());
+        std::priority_queue<WaveElem, std::vector<WaveElem>, CompareWaveElem> local_wavefront;
+        
+        best_times[start_node] = 0.0;
+        local_wavefront.push(WaveElem(start_node, NO_EDGE, 0.0));
+        
+        int pois_found = 0;
+        
+        while (!local_wavefront.empty() && pois_found < num_pois) {
+            WaveElem current = local_wavefront.top();
+            local_wavefront.pop();
+            
+            IntersectionIdx currNode = current.nodeID;
+            if (current.travelTime > best_times[currNode]) continue;
+            
+            auto it = intersection_to_poi.find(currNode);
+            if (it != intersection_to_poi.end()) {
+                int target_poi_idx = it->second;
+                if (dense_cost_matrix[i][target_poi_idx] == std::numeric_limits<double>::infinity()) {
+                    dense_cost_matrix[i][target_poi_idx] = best_times[currNode];
+                    pois_found++;
+                }
+            }
+            
+            StreetIdx currentStreet = (current.edgeID != NO_EDGE) ? segmentInfos[current.edgeID].streetID : NO_STREET;
+            
+            for (StreetSegmentIdx segID : intersectionSegments[currNode]) {
+                const StreetSegmentInfo& info = segmentInfos[segID];
+                IntersectionIdx neighbor = (info.from == currNode) ? info.to : (!info.oneWay ? info.from : NO_INTERSECTION);
+                if (neighbor == NO_INTERSECTION) continue;
+                
+                double edgeTime = segmentTravelTimes[segID];
+                double turnTime = (currentStreet != NO_STREET && currentStreet != info.streetID) ? turn_penalty : 0.0;
+                double newTime = best_times[currNode] + edgeTime + turnTime;
+                
+                if (newTime < best_times[neighbor]) {
+                    best_times[neighbor] = newTime;
+                    local_wavefront.push(WaveElem(neighbor, segID, newTime));
+                }
+            }
+        }
+    }
+}
 
-std::vector<IntersectionIdx> getUniquePOIs(
+
+
+//Greedy baseline generator 
+
+Route generateGreedyRoute(IntersectionIdx start_depot, const std::vector<DeliveryInf>& deliveries, const std::vector<IntersectionIdx>& depots) {
+    Route route;
+    int D = deliveries.size();
+    
+    // Setup the thread-specific mapping
+    route.action_to_poi.resize(2 * D + 2);
+    for (int i = 0; i < D; ++i) {
+        route.action_to_poi[i] = intersection_to_poi[deliveries[i].pickUp];
+        route.action_to_poi[i + D] = intersection_to_poi[deliveries[i].dropOff];
+    }
+    route.action_to_poi[2 * D] = intersection_to_poi[start_depot];
+    // End depot will be set at the end
+
+    route.sequence.push_back(2 * D); // Start depot action
+    
+    std::vector<bool> picked_up(D, false);
+    std::vector<bool> dropped_off(D, false);
+    int deliveries_completed = 0;
+    
+    int current_poi = route.action_to_poi[2 * D];
+    
+    while (deliveries_completed < D) {
+        int best_next_action = -1;
+        double shortest_time = std::numeric_limits<double>::infinity();
+        
+        for (int i = 0; i < D; ++i) {
+            // Check valid pickups
+            if (!picked_up[i]) {
+                int p_poi = route.action_to_poi[i];
+                if (dense_cost_matrix[current_poi][p_poi] < shortest_time) {
+                    shortest_time = dense_cost_matrix[current_poi][p_poi];
+                    best_next_action = i;
+                }
+            } 
+            // Check valid dropoffs
+            else if (!dropped_off[i]) {
+                int d_poi = route.action_to_poi[i + D];
+                if (dense_cost_matrix[current_poi][d_poi] < shortest_time) {
+                    shortest_time = dense_cost_matrix[current_poi][d_poi];
+                    best_next_action = i + D;
+                }
+            }
+        }
+        if (best_next_action == -1) {
+            route.sequence.clear();
+            route.total_travel_time = std::numeric_limits<double>::infinity();
+            return route;
+        }
+        
+        route.sequence.push_back(best_next_action);
+        route.total_travel_time += shortest_time;
+        current_poi = route.action_to_poi[best_next_action];
+        
+        // Update statuses based on the ACTION, not the physical POI
+        if (best_next_action < D) picked_up[best_next_action] = true;
+        else {
+            dropped_off[best_next_action - D] = true;
+            deliveries_completed++;
+        }
+    }
+    
+    // Find closest end depot
+    int best_end_depot_poi = -1;
+    double shortest_depot_time = std::numeric_limits<double>::infinity();
+    for (IntersectionIdx depot : depots) {
+        int depot_poi = intersection_to_poi[depot];
+        if (dense_cost_matrix[current_poi][depot_poi] < shortest_depot_time) {
+            shortest_depot_time = dense_cost_matrix[current_poi][depot_poi];
+            best_end_depot_poi = depot_poi;
+        }
+    }
+
+    if (best_end_depot_poi == -1) {
+        route.sequence.clear();
+        route.total_travel_time = std::numeric_limits<double>::infinity();
+        return route;
+    }
+    
+    route.action_to_poi[2 * D + 1] = best_end_depot_poi;
+    route.sequence.push_back(2 * D + 1); // End depot action
+    route.total_travel_time += shortest_depot_time;
+    
+    return route;
+}
+
+//Simulated annealing 
+bool isLegalFast(const std::vector<int>& seq, int D) {
+    std::vector<bool> picked_up(D, false);
+    for (int action : seq) {
+        if (action < D) { // It's a pickup
+            picked_up[action] = true;
+        } else if (action < 2 * D) { // It's a dropoff
+            if (!picked_up[action - D]) return false; // Dropped off before pickup!
+        }
+    }
+    return true;
+}
+
+double calculateDeltaCost(const Route& route, int idxA, int idxB) {
+    if (idxA > idxB) std::swap(idxA, idxB);
+    
+    const auto& seq = route.sequence;
+    const auto& a2p = route.action_to_poi;
+    
+    int poi_A = a2p[seq[idxA]];
+    int poi_B = a2p[seq[idxB]];
+    int poi_prevA = a2p[seq[idxA - 1]];
+    int poi_nextA = a2p[seq[idxA + 1]];
+    int poi_prevB = a2p[seq[idxB - 1]];
+    int poi_nextB = a2p[seq[idxB + 1]];
+
+    if (idxA + 1 == idxB) {
+        double old_cost = dense_cost_matrix[poi_prevA][poi_A] + dense_cost_matrix[poi_A][poi_B] + dense_cost_matrix[poi_B][poi_nextB];
+        double new_cost = dense_cost_matrix[poi_prevA][poi_B] + dense_cost_matrix[poi_B][poi_A] + dense_cost_matrix[poi_A][poi_nextB];
+        return new_cost - old_cost;
+    } else {
+        double old_cost = dense_cost_matrix[poi_prevA][poi_A] + dense_cost_matrix[poi_A][poi_nextA] + dense_cost_matrix[poi_prevB][poi_B] + dense_cost_matrix[poi_B][poi_nextB];
+        double new_cost = dense_cost_matrix[poi_prevA][poi_B] + dense_cost_matrix[poi_B][poi_nextA] + dense_cost_matrix[poi_prevB][poi_A] + dense_cost_matrix[poi_A][poi_nextB];
+        return new_cost - old_cost;
+    }
+}
+
+Route simulatedAnnealing(Route initial_route, double time_limit_seconds) {
+    auto sa_start = std::chrono::high_resolution_clock::now();
+    Route current = initial_route;
+    Route best = initial_route;
+    
+    uint32_t seed = std::chrono::system_clock::now().time_since_epoch().count();
+    std::mt19937 rng(seed);
+    double temp = 5000.0;
+    double cooling_rate = 0.99999; 
+    
+    int iterations = 0;
+    int seq_size = current.sequence.size();
+    
+    // If route is just depot -> depot, no optimization needed
+    if (seq_size <= 3) return best; 
+    
+    // Calculate D (number of deliveries) from the sequence size
+    int D = (seq_size - 2) / 2;
+    
+    std::uniform_int_distribution<int> dist(1, seq_size - 2);
+    std::uniform_real_distribution<double> prob(0.0, 1.0);
+
+    while (true) {
+        if (++iterations % 1000 == 0) {
+            auto now = std::chrono::high_resolution_clock::now();
+            std::chrono::duration<double> elapsed = now - sa_start;
+            if (elapsed.count() > time_limit_seconds) break;
+        }
+        
+        int idxA = dist(rng);
+        int idxB = dist(rng);
+        if (idxA == idxB) continue;
+        
+        std::swap(current.sequence[idxA], current.sequence[idxB]);
+        
+        //Pass D to isLegalFast
+        if (!isLegalFast(current.sequence, D)) {
+            std::swap(current.sequence[idxA], current.sequence[idxB]); // Revert
+            continue;
+        }
+        
+        std::swap(current.sequence[idxA], current.sequence[idxB]); // Unswap to calc delta safely
+        
+        //Pass the 'current' Route object instead of current.sequence
+        double delta = calculateDeltaCost(current, idxA, idxB);
+        
+        if (delta < 0 || exp(-delta / temp) > prob(rng)) {
+            std::swap(current.sequence[idxA], current.sequence[idxB]); // Accept
+            current.total_travel_time += delta;
+            if (current.total_travel_time < best.total_travel_time) best = current;
+        }
+        
+        temp *= cooling_rate;
+    }
+    return best;
+}
+
+//Multithreading 
+std::vector<CourierSubPath> travelingCourier(
+    const float turn_penalty,
     const std::vector<DeliveryInf>& deliveries,
     const std::vector<IntersectionIdx>& depots) {
-  std::vector<IntersectionIdx> all_pois;
+    
+    auto global_start = std::chrono::high_resolution_clock::now();
 
-  // Add all pickups and dropoffs
-  for (const auto& delivery : deliveries) {
-    all_pois.push_back(delivery.pickUp);
-    all_pois.push_back(delivery.dropOff);
-  }
+    //Pre-computations
+    buildCostMatrix(deliveries, depots, turn_penalty); 
 
-  // Add all depots
-  for (IntersectionIdx depot : depots) {
-    all_pois.push_back(depot);
-  }
+    //ultithreading Setup
+    int num_threads = std::thread::hardware_concurrency();
+    if (num_threads == 0) num_threads = 4;
 
-  // Remove duplicates (e.g., if two packages are picked up at the same place)
-  std::sort(all_pois.begin(), all_pois.end());
-  all_pois.erase(std::unique(all_pois.begin(), all_pois.end()), all_pois.end());
-
-  return all_pois;
-}
-
-// Multi-Target Dijkstra's Algorithm
-std::unordered_map<IntersectionIdx, POI_Data> multiTargetDijkstra(
-    IntersectionIdx start_node, const std::vector<IntersectionIdx>& all_pois,
-    const float turn_penalty) {
-
-  std::unordered_map<IntersectionIdx, POI_Data> found_paths;
-  int targets_found = 0;
-  int total_targets = all_pois.size();
-
-  // Dirty Reset (from M3)
-  for (IntersectionIdx idx : touchedDriveNodes) {
-    nodes[idx].bestTime = std::numeric_limits<double>::infinity();
-    nodes[idx].reachingEdge = NO_EDGE;
-    nodes[idx].visited = false;
-  }
-  touchedDriveNodes.clear();
-  clearWavefront();
-
-  // Initialize Start Node
-  nodes[start_node].bestTime = 0.0;
-  touchedDriveNodes.push_back(start_node);
-  wavefront.push(WaveElem(start_node, NO_EDGE, 0.0));
-
-  // The Dijkstra Expansion Loop
-  while (!wavefront.empty() && targets_found < total_targets) {
-    WaveElem current = wavefront.top();
-    wavefront.pop();
-
-    IntersectionIdx currNode = current.nodeID;
-    if (nodes[currNode].visited) continue;
-    nodes[currNode].visited = true;
-
-    // If this is one of our target POIs, reconstruct the path and save it
-    if (is_poi[currNode]) {
-      targets_found++;
-
-      // Reconstruct the path immediately
-      std::vector<StreetSegmentIdx> path;
-      IntersectionIdx tracer = currNode;
-      while (tracer != start_node) {
-        StreetSegmentIdx edge = nodes[tracer].reachingEdge;
-        path.push_back(edge);
-        tracer = segmentInfos[edge].from == tracer
-                     ? segmentInfos[edge].to
-                     : segmentInfos[edge].from;  // Careful with 1-way tracing
-      }
-      std::reverse(path.begin(), path.end());
-
-      // Save to our results map
-      found_paths[currNode] = {nodes[currNode].bestTime, path};
+    double max_time = 48.0;
+    if (deliveries.size() <= 5) {
+        max_time = 0.5;
+    } else if (deliveries.size() <= 30) {
+        max_time = 5.0;
     }
-
-    // Check neighbors
-    StreetIdx currentStreet = (current.edgeID != NO_EDGE)
-                                  ? segmentInfos[current.edgeID].streetID
-                                  : NO_STREET;
-
-    for (StreetSegmentIdx segID : intersectionSegments[currNode]) {
-      const StreetSegmentInfo& info = segmentInfos[segID];
-
-      IntersectionIdx neighbor = NO_INTERSECTION;
-      if (info.from == currNode)
-        neighbor = info.to;
-      else if (!info.oneWay)
-        neighbor = info.from;
-      else
-        continue;  // For one way streets
-
-      double edgeTime = segmentTravelTimes[segID];
-      double turnTime =
-          (currentStreet != NO_STREET && currentStreet != info.streetID)
-              ? turn_penalty
-              : 0.0;
-      double newTime = nodes[currNode].bestTime + edgeTime + turnTime;
-
-      if (newTime < nodes[neighbor].bestTime) {
-        if (nodes[neighbor].bestTime ==
-            std::numeric_limits<double>::infinity()) {
-          touchedDriveNodes.push_back(neighbor);
+    
+    std::vector<std::future<Route>> futures;
+    
+    for (int i = 0; i < num_threads; ++i) {
+      
+        futures.push_back(std::async(std::launch::async, [i, &deliveries, &depots, global_start, max_time]() {
+            IntersectionIdx start_depot = depots[i % depots.size()];
+            Route base = generateGreedyRoute(start_depot, deliveries, depots);
+            
+            auto now = std::chrono::high_resolution_clock::now();
+            std::chrono::duration<double> elapsed = now - global_start;
+            double time_left_for_sa = max_time - elapsed.count(); 
+            
+            if (time_left_for_sa <= 0) return base; // Fallback if matrix took too long
+            return simulatedAnnealing(base, time_left_for_sa);
+        }));
+    }
+    
+    //Find Absolute Best Route
+    Route absolute_best;
+    absolute_best.total_travel_time = std::numeric_limits<double>::infinity();
+    for (auto& f : futures) {
+        Route r = f.get();
+        if (r.total_travel_time < absolute_best.total_travel_time) {
+            absolute_best = r;
         }
-        nodes[neighbor].bestTime = newTime;
-        nodes[neighbor].reachingEdge = segID;
-
-        // Use plain Dijkstra time
-        wavefront.push(WaveElem(neighbor, segID, newTime));
-      }
     }
-  }
-
-  return found_paths;
-}
-
-void buildTravelCache(const std::vector<DeliveryInf>& deliveries,
-                      const std::vector<IntersectionIdx>& depots,
-                      const float turn_penalty) {
-  travel_cache.clear();
-
-  // Get unique POIs
-  std::vector<IntersectionIdx> all_pois = getUniquePOIs(deliveries, depots);
-
-  // Setup the fast POI checker, should be O(1) 
-  int num_intersections = getNumIntersections();
-  is_poi.assign(num_intersections, false);
-  for (IntersectionIdx poi : all_pois) {
-    is_poi[poi] = true;
-  }
-
-  // Flood the map from every POI
-  for (int i = 0; i < all_pois.size(); i++) {
-    IntersectionIdx start_poi = all_pois[i];
-    travel_cache[start_poi] =
-        multiTargetDijkstra(start_poi, all_pois, turn_penalty);
-  }
-}
-
-// Helper function to calculate total travel time for a given route sequence
-double calculateRouteTime(const std::vector<IntersectionIdx>& route_sequence) {
-  double total_time = 0.0;
-  for (size_t i = 0; i < route_sequence.size() - 1; ++i) {
-    IntersectionIdx from = route_sequence[i];
-    IntersectionIdx to = route_sequence[i + 1];
-    total_time += travel_cache[from][to].travel_time;
-  }
-  return total_time;
-}
-
-// Helper function to calculate a route starting from a specific depot
-std::vector<IntersectionIdx> generateGreedyRoute(
-    IntersectionIdx start_depot, const std::vector<DeliveryInf>& deliveries,
-    const std::vector<IntersectionIdx>& depots) {
-  std::vector<IntersectionIdx> route;
-  route.push_back(start_depot);
-
-  int N = deliveries.size();
-  std::vector<bool> picked_up(N, false);
-  std::vector<bool> dropped_off(N, false);
-  int deliveries_completed = 0;
-
-  IntersectionIdx current_node = start_depot;
-
-  // Greedy Loop, at each step, pick the closest next pickup or dropoff
-  while (deliveries_completed < N) {
-    double best_time = std::numeric_limits<double>::infinity();
-    IntersectionIdx best_next_node = NO_INTERSECTION;
-    int best_delivery_index = -1;
-    bool is_pickup_move = false;
-
-    // Check all possible next moves (pickups and dropoffs)
-    for (int i = 0; i < N; ++i) {
-      if (!picked_up[i]) {
-        IntersectionIdx candidate = deliveries[i].pickUp;
-
-        // Safely check if a path actually exists in the cache
-        auto it = travel_cache[current_node].find(candidate);
-        if (it != travel_cache[current_node].end()) {
-          double time = it->second.travel_time;
-          if (time < best_time) {
-            best_time = time;
-            best_next_node = candidate;
-            best_delivery_index = i;
-            is_pickup_move = true;
-          }
+    
+    //Reconstruct Street Paths using M3 logic
+    std::vector<CourierSubPath> final_route;
+    if (absolute_best.sequence.empty() || absolute_best.total_travel_time == std::numeric_limits<double>::infinity()) {
+        return final_route; // Return empty if no valid route found
+    }
+    
+    for (size_t i = 0; i < absolute_best.sequence.size() - 1; ++i) {
+        int action_start = absolute_best.sequence[i];
+        int action_end = absolute_best.sequence[i+1];
+        
+        IntersectionIdx start_intersection = poi_to_intersection[absolute_best.action_to_poi[action_start]];
+        IntersectionIdx end_intersection = poi_to_intersection[absolute_best.action_to_poi[action_end]];
+        
+        CourierSubPath sub;
+        sub.intersections = {start_intersection, end_intersection};
+        
+        if (start_intersection == end_intersection) {
+            // Do not 'continue'! Push an empty path so the autotester knows we stopped here.
+            sub.subpath = std::vector<StreetSegmentIdx>(); 
+        } else {
+            sub.subpath = findPathBetweenIntersections(turn_penalty, {start_intersection, end_intersection});
         }
-      } else if (picked_up[i] && !dropped_off[i]) {
-        IntersectionIdx candidate = deliveries[i].dropOff;
-
-        // Safely check if a path actually exists in the cache
-        auto it = travel_cache[current_node].find(candidate);
-        if (it != travel_cache[current_node].end()) {
-          double time = it->second.travel_time;
-          if (time < best_time) {
-            best_time = time;
-            best_next_node = candidate;
-            best_delivery_index = i;
-            is_pickup_move = false;
-          }
-        }
-      }
+        
+        final_route.push_back(sub);
     }
-
-    // If we can't find any valid next move we must fail 
-    if (best_delivery_index == -1) {
-      return std::vector<IntersectionIdx>();  // Return an empty, failed route
-    }
-
-    if (is_pickup_move)
-      picked_up[best_delivery_index] = true;
-    else {
-      dropped_off[best_delivery_index] = true;
-      deliveries_completed++;
-    }
-
-    if (best_next_node != current_node) {
-      route.push_back(best_next_node);
-      current_node = best_next_node;
-    }
-  }
-
-  // Find closest end depot
-  double best_depot_time = std::numeric_limits<double>::infinity();
-  IntersectionIdx best_end_depot = NO_INTERSECTION;
-
-  for (IntersectionIdx depot : depots) {
-    auto it = travel_cache[current_node].find(depot);
-    if (it != travel_cache[current_node].end()) {
-      double time = it->second.travel_time;
-      if (time < best_depot_time) {
-        best_depot_time = time;
-        best_end_depot = depot;
-      }
-    }
-  }
-
-  // Ensure we found a valid end depot before adding it to the route
-  if (best_end_depot == NO_INTERSECTION) return std::vector<IntersectionIdx>();
-
-  if (best_end_depot != current_node) {
-    route.push_back(best_end_depot);
-  }
-
-  return route;
+    
+    return final_route;
 }
-
-bool isLegalRoute(const std::vector<IntersectionIdx>& test_route,
-                  const std::vector<DeliveryInf>& deliveries) {
-  // Check that for every delivery, the pickup happens before the dropoff in the route.
-  std::unordered_map<IntersectionIdx, int> positions;
-
-  // First, record the position of each intersection in the route
-  for (int i = 0; i < test_route.size(); ++i) {
-    IntersectionIdx current_node = test_route[i];
-    if (positions.find(current_node) == positions.end()) {
-      positions[current_node] = i;
-    }
-  }
-
-  // Now check each delivery against the positions
-  for (const auto& delivery : deliveries) {
-    int pickup_pos = positions[delivery.pickUp];
-    int dropoff_pos = positions[delivery.dropOff];
-
-    // If either the pickup or dropoff is missing from the route, it's illegal
-    if (dropoff_pos <= pickup_pos) {
-      if (delivery.pickUp != delivery.dropOff) {
-        return false;
-      }
-    }
-  }
-
-  return true;
-}
-
-std::vector<CourierSubPath> travelingCourier(
-    const float turn_penalty, const std::vector<DeliveryInf>& deliveries,
-    const std::vector<IntersectionIdx>& depots) {
-  // Start the master clock
-  auto start_time = std::chrono::high_resolution_clock::now();
-
-  // Build the travel cache
-  buildTravelCache(deliveries, depots, turn_penalty);
-
-  // Try a greedy route from each depot
-  std::vector<IntersectionIdx> best_route_sequence;
-  double best_route_time = std::numeric_limits<double>::infinity();
-
-  // Generate a route starting from each depot, and keep the best one
-  for (IntersectionIdx start_depot : depots) {
-    std::vector<IntersectionIdx> current_route =
-        generateGreedyRoute(start_depot, deliveries, depots);
-
-    // Check if we got a valid route back before comparing times
-    if (!current_route.empty()) {
-      double current_time = calculateRouteTime(current_route);
-      if (current_time < best_route_time) {
-        best_route_time = current_time;
-        best_route_sequence = current_route;
-      }
-    }
-  }
-
-  std::srand(
-      8675309);  // Seed the random number generator so bugs are reproducible
-
-  double time_limit = 48.0;
-  if (deliveries.size() <= 5) {
-    time_limit = 0.5;
-  } else if (deliveries.size() <= 30) {
-    time_limit = 5.0;
-  }
-
-  while (true) {
-    // Check the clock
-    auto current_time = std::chrono::high_resolution_clock::now();
-    auto elapsed_seconds = std::chrono::duration_cast<std::chrono::seconds>(
-                               current_time - start_time)
-                               .count();
-
-    // If we've hit our time limit, stop iterating
-    if (elapsed_seconds >= time_limit) {
-      break;
-    }
-
-    // Clone the route so we can mess with it
-    std::vector<IntersectionIdx> test_route = best_route_sequence;
-
-    // Pick two random stops to swap.
-    int max_index = test_route.size() - 2;
-    if (max_index <= 1) break;  // Route is too small to swap anything
-
-    int swap_idx1 = 1 + std::rand() % max_index;
-    int swap_idx2 = 1 + std::rand() % max_index;
-
-    // Perform the swap
-    std::swap(test_route[swap_idx1], test_route[swap_idx2]);
-
-    // Test the mutated route
-    if (isLegalRoute(test_route, deliveries)) {
-      double test_time = calculateRouteTime(test_route);  // O(N) fast lookup
-
-      // If it's better than our best, keep it
-      if (test_time < best_route_time) {
-        best_route_sequence = test_route;
-        best_route_time = test_time;
-      }
-    }
-  }
-
-  std::vector<CourierSubPath> final_result;
-
-  // Return empty if no valid route was found
-  if (best_route_sequence.empty()) {
-    return final_result;
-  }
-
-  // Iterate through our optimized sequence, one leg at a time
-  for (size_t i = 0; i < best_route_sequence.size() - 1; ++i) {
-    IntersectionIdx start_poi = best_route_sequence[i];
-    IntersectionIdx end_poi = best_route_sequence[i + 1];
-
-    CourierSubPath current_subpath;
-
-    // Log the start and end of this leg
-    current_subpath.intersections = std::make_pair(start_poi, end_poi);
-
-    // Grab the actual street driving directions from our Phase 1 Matrix
-    current_subpath.subpath = travel_cache[start_poi][end_poi].path;
-
-    // Add this leg to the final route
-    final_result.push_back(current_subpath);
-  }
-
-  // Return the final route
-  return final_result;
-}
-
-
