@@ -1,6 +1,6 @@
 #include "m4.h"
-#include "m3.h"           // Needed for findPathBetweenIntersections
-#include "m3_globals.h"  
+#include "m3.h"
+#include "m3_globals.h"
 #include <limits>
 #include <vector>
 #include <unordered_map>
@@ -12,88 +12,70 @@
 #include <algorithm>
 #include <iostream>
 
-//Data structures and globals 
-
-// Replace your old Route struct with this:
+// =============================================================================
+// DATA STRUCTURES
+// =============================================================================
 struct Route {
-    std::vector<int> sequence;      // Stores Action IDs (0 to 2D+1)
-    std::vector<int> action_to_poi; // Maps Action ID -> Dense POI index
+    std::vector<int> sequence;      // Action IDs
+    std::vector<int> action_to_poi; // Action ID -> Dense Matrix Index
     double total_travel_time = 0.0;
 };
 
-// Fast mappings between physical intersections and our dense 0 to K-1 matrix indices
 std::unordered_map<IntersectionIdx, int> intersection_to_poi;
 std::vector<IntersectionIdx> poi_to_intersection;
-
-//Lookup matrix: dense_cost_matrix[source_poi][dest_poi] O(1) 
 std::vector<std::vector<double>> dense_cost_matrix;
 
-
-//Matrix and dependency builders 
-
+// =============================================================================
+// PHASE 1: PARALLEL MATRIX BUILDER (From Tutorial Slide 29/40)
+// =============================================================================
 void buildCostMatrix(const std::vector<DeliveryInf>& deliveries, const std::vector<IntersectionIdx>& depots, float turn_penalty) {
-    // Collect all unique POIs
     std::vector<IntersectionIdx> unique_pois;
-    for (const auto& dep : depots) unique_pois.push_back(dep);
-    for (const auto& del : deliveries) {
-        unique_pois.push_back(del.pickUp);
-        unique_pois.push_back(del.dropOff);
-    }
+    for (auto d : deliveries) { unique_pois.push_back(d.pickUp); unique_pois.push_back(d.dropOff); }
+    for (auto d : depots) unique_pois.push_back(d);
     
-    // Sort and remove duplicates to create dense indexing
     std::sort(unique_pois.begin(), unique_pois.end());
     unique_pois.erase(std::unique(unique_pois.begin(), unique_pois.end()), unique_pois.end());
     
-    int num_pois = unique_pois.size();
     poi_to_intersection = unique_pois;
-    
     intersection_to_poi.clear();
-    for (int i = 0; i < num_pois; ++i) {
-        intersection_to_poi[unique_pois[i]] = i;
-    }
-    
-    // Allocate matrix
-    dense_cost_matrix.assign(num_pois, std::vector<double>(num_pois, std::numeric_limits<double>::infinity()));
-    int total_intersections = getNumIntersections(); 
+    for(size_t i=0; i<poi_to_intersection.size(); ++i) intersection_to_poi[poi_to_intersection[i]] = i;
 
-    // Multi-Target Dijkstra
+    int num_pois = poi_to_intersection.size();
+    dense_cost_matrix.assign(num_pois, std::vector<double>(num_pois, std::numeric_limits<double>::infinity()));
+    int total_nodes = getNumIntersections();
+
+    // Unlock massive speedup with OpenMP [cite: 269, 463]
+    #pragma omp parallel for
     for (int i = 0; i < num_pois; ++i) {
-        IntersectionIdx start_node = poi_to_intersection[i];
-        
-        std::vector<double> best_times(total_intersections, std::numeric_limits<double>::infinity());
+        std::vector<double> best_times(total_nodes, std::numeric_limits<double>::infinity());
         std::priority_queue<WaveElem, std::vector<WaveElem>, CompareWaveElem> local_wavefront;
         
+        IntersectionIdx start_node = poi_to_intersection[i];
         best_times[start_node] = 0.0;
         local_wavefront.push(WaveElem(start_node, NO_EDGE, 0.0));
-        
-        int pois_found = 0;
-        
-        while (!local_wavefront.empty() && pois_found < num_pois) {
+
+        int found_count = 0;
+        while(!local_wavefront.empty() && found_count < num_pois) {
             WaveElem current = local_wavefront.top();
             local_wavefront.pop();
-            
-            IntersectionIdx currNode = current.nodeID;
-            if (current.travelTime > best_times[currNode]) continue;
-            
-            auto it = intersection_to_poi.find(currNode);
+            if (current.travelTime > best_times[current.nodeID]) continue;
+
+            auto it = intersection_to_poi.find(current.nodeID);
             if (it != intersection_to_poi.end()) {
-                int target_poi_idx = it->second;
-                if (dense_cost_matrix[i][target_poi_idx] == std::numeric_limits<double>::infinity()) {
-                    dense_cost_matrix[i][target_poi_idx] = best_times[currNode];
-                    pois_found++;
+                if (dense_cost_matrix[i][it->second] == std::numeric_limits<double>::infinity()) {
+                    dense_cost_matrix[i][it->second] = current.travelTime;
+                    found_count++;
                 }
             }
-            
-            StreetIdx currentStreet = (current.edgeID != NO_EDGE) ? segmentInfos[current.edgeID].streetID : NO_STREET;
-            
-            for (StreetSegmentIdx segID : intersectionSegments[currNode]) {
-                const StreetSegmentInfo& info = segmentInfos[segID];
-                IntersectionIdx neighbor = (info.from == currNode) ? info.to : (!info.oneWay ? info.from : NO_INTERSECTION);
+
+            StreetIdx currStreet = (current.edgeID != NO_EDGE) ? segmentInfos[current.edgeID].streetID : NO_STREET;
+            for (auto segID : intersectionSegments[current.nodeID]) {
+                const auto& info = segmentInfos[segID];
+                IntersectionIdx neighbor = (info.from == current.nodeID) ? info.to : (!info.oneWay ? info.from : NO_INTERSECTION);
                 if (neighbor == NO_INTERSECTION) continue;
-                
-                double edgeTime = segmentTravelTimes[segID];
-                double turnTime = (currentStreet != NO_STREET && currentStreet != info.streetID) ? turn_penalty : 0.0;
-                double newTime = best_times[currNode] + edgeTime + turnTime;
+
+                double newTime = current.travelTime + segmentTravelTimes[segID] + 
+                                ((currStreet != NO_STREET && currStreet != info.streetID) ? turn_penalty : 0.0);
                 
                 if (newTime < best_times[neighbor]) {
                     best_times[neighbor] = newTime;
@@ -104,263 +86,154 @@ void buildCostMatrix(const std::vector<DeliveryInf>& deliveries, const std::vect
     }
 }
 
-
-
-//Greedy baseline generator 
-
+// =============================================================================
+// PHASE 2: MULTI-START GREEDY BASELINE (From Lecture 20)
+// =============================================================================
 Route generateGreedyRoute(IntersectionIdx start_depot, const std::vector<DeliveryInf>& deliveries, const std::vector<IntersectionIdx>& depots) {
     Route route;
     int D = deliveries.size();
-    
-    // Setup the thread-specific mapping
-    route.action_to_poi.resize(2 * D + 2);
-    for (int i = 0; i < D; ++i) {
-        route.action_to_poi[i] = intersection_to_poi[deliveries[i].pickUp];
-        route.action_to_poi[i + D] = intersection_to_poi[deliveries[i].dropOff];
+    route.action_to_poi.resize(2*D + 2);
+    for(int i=0; i<D; ++i) { 
+        route.action_to_poi[i] = intersection_to_poi[deliveries[i].pickUp]; 
+        route.action_to_poi[i+D] = intersection_to_poi[deliveries[i].dropOff]; 
     }
-    route.action_to_poi[2 * D] = intersection_to_poi[start_depot];
-    // End depot will be set at the end
+    route.action_to_poi[2*D] = intersection_to_poi[start_depot];
+    route.sequence.push_back(2*D);
 
-    route.sequence.push_back(2 * D); // Start depot action
-    
-    std::vector<bool> picked_up(D, false);
-    std::vector<bool> dropped_off(D, false);
-    int deliveries_completed = 0;
-    
-    int current_poi = route.action_to_poi[2 * D];
-    
-    while (deliveries_completed < D) {
-        int best_next_action = -1;
-        double shortest_time = std::numeric_limits<double>::infinity();
-        
-        for (int i = 0; i < D; ++i) {
-            // Check valid pickups
-            if (!picked_up[i]) {
-                int p_poi = route.action_to_poi[i];
-                if (dense_cost_matrix[current_poi][p_poi] < shortest_time) {
-                    shortest_time = dense_cost_matrix[current_poi][p_poi];
-                    best_next_action = i;
+    std::vector<bool> picked(D, false), dropped(D, false);
+    int curr_poi = route.action_to_poi[2*D], done = 0;
+
+    while (done < D) {
+        int next_act = -1; double best_t = std::numeric_limits<double>::infinity();
+        for (int i=0; i<D; ++i) {
+            if (!picked[i]) {
+                if (dense_cost_matrix[curr_poi][route.action_to_poi[i]] < best_t) {
+                    best_t = dense_cost_matrix[curr_poi][route.action_to_poi[i]]; next_act = i;
                 }
-            } 
-            // Check valid dropoffs
-            else if (!dropped_off[i]) {
-                int d_poi = route.action_to_poi[i + D];
-                if (dense_cost_matrix[current_poi][d_poi] < shortest_time) {
-                    shortest_time = dense_cost_matrix[current_poi][d_poi];
-                    best_next_action = i + D;
+            } else if (!dropped[i]) {
+                if (dense_cost_matrix[curr_poi][route.action_to_poi[i+D]] < best_t) {
+                    best_t = dense_cost_matrix[curr_poi][route.action_to_poi[i+D]]; next_act = i+D;
                 }
             }
         }
-        if (best_next_action == -1) {
-            route.sequence.clear();
-            route.total_travel_time = std::numeric_limits<double>::infinity();
-            return route;
-        }
-        
-        route.sequence.push_back(best_next_action);
-        route.total_travel_time += shortest_time;
-        current_poi = route.action_to_poi[best_next_action];
-        
-        // Update statuses based on the ACTION, not the physical POI
-        if (best_next_action < D) picked_up[best_next_action] = true;
-        else {
-            dropped_off[best_next_action - D] = true;
-            deliveries_completed++;
-        }
-    }
-    
-    // Find closest end depot
-    int best_end_depot_poi = -1;
-    double shortest_depot_time = std::numeric_limits<double>::infinity();
-    for (IntersectionIdx depot : depots) {
-        int depot_poi = intersection_to_poi[depot];
-        if (dense_cost_matrix[current_poi][depot_poi] < shortest_depot_time) {
-            shortest_depot_time = dense_cost_matrix[current_poi][depot_poi];
-            best_end_depot_poi = depot_poi;
-        }
+        if (next_act == -1) { route.sequence.clear(); return route; }
+        route.sequence.push_back(next_act);
+        route.total_travel_time += best_t;
+        curr_poi = route.action_to_poi[next_act];
+        if (next_act < D) picked[next_act] = true; else { dropped[next_act-D] = true; done++; }
     }
 
-    if (best_end_depot_poi == -1) {
-        route.sequence.clear();
-        route.total_travel_time = std::numeric_limits<double>::infinity();
-        return route;
+    int end_poi = -1; double best_depot_t = std::numeric_limits<double>::infinity();
+    for (auto d : depots) {
+        int d_poi = intersection_to_poi[d];
+        if (dense_cost_matrix[curr_poi][d_poi] < best_depot_t) {
+            best_depot_t = dense_cost_matrix[curr_poi][d_poi]; end_poi = d_poi;
+        }
     }
-    
-    route.action_to_poi[2 * D + 1] = best_end_depot_poi;
-    route.sequence.push_back(2 * D + 1); // End depot action
-    route.total_travel_time += shortest_depot_time;
-    
+    if (end_poi == -1) { route.sequence.clear(); return route; }
+    route.action_to_poi[2*D+1] = end_poi;
+    route.sequence.push_back(2*D+1);
+    route.total_travel_time += best_depot_t;
     return route;
 }
 
-//Simulated annealing 
+// =============================================================================
+// PHASE 3: CALIBRATED SIMULATED ANNEALING (From Lecture 22)
+// =============================================================================
 bool isLegalFast(const std::vector<int>& seq, int D) {
-    std::vector<bool> picked_up(D, false);
-    for (int action : seq) {
-        if (action < D) { // It's a pickup
-            picked_up[action] = true;
-        } else if (action < 2 * D) { // It's a dropoff
-            if (!picked_up[action - D]) return false; // Dropped off before pickup!
-        }
+    std::vector<bool> p(D, false);
+    for (int a : seq) {
+        if (a < D) p[a] = true;
+        else if (a < 2*D && !p[a-D]) return false;
     }
     return true;
 }
 
-double calculateDeltaCost(const Route& route, int idxA, int idxB) {
+double calculateDeltaCost(const Route& r, int idxA, int idxB) {
     if (idxA > idxB) std::swap(idxA, idxB);
-    
-    const auto& seq = route.sequence;
-    const auto& a2p = route.action_to_poi;
-    
-    int poi_A = a2p[seq[idxA]];
-    int poi_B = a2p[seq[idxB]];
-    int poi_prevA = a2p[seq[idxA - 1]];
-    int poi_nextA = a2p[seq[idxA + 1]];
-    int poi_prevB = a2p[seq[idxB - 1]];
-    int poi_nextB = a2p[seq[idxB + 1]];
+    int A = r.sequence[idxA], B = r.sequence[idxB];
+    int pA = r.action_to_poi[r.sequence[idxA-1]], nA = r.action_to_poi[r.sequence[idxA+1]];
+    int pB = r.action_to_poi[r.sequence[idxB-1]], nB = r.action_to_poi[r.sequence[idxB+1]];
+    int aPOI = r.action_to_poi[A], bPOI = r.action_to_poi[B];
 
     if (idxA + 1 == idxB) {
-        double old_cost = dense_cost_matrix[poi_prevA][poi_A] + dense_cost_matrix[poi_A][poi_B] + dense_cost_matrix[poi_B][poi_nextB];
-        double new_cost = dense_cost_matrix[poi_prevA][poi_B] + dense_cost_matrix[poi_B][poi_A] + dense_cost_matrix[poi_A][poi_nextB];
-        return new_cost - old_cost;
-    } else {
-        double old_cost = dense_cost_matrix[poi_prevA][poi_A] + dense_cost_matrix[poi_A][poi_nextA] + dense_cost_matrix[poi_prevB][poi_B] + dense_cost_matrix[poi_B][poi_nextB];
-        double new_cost = dense_cost_matrix[poi_prevA][poi_B] + dense_cost_matrix[poi_B][poi_nextA] + dense_cost_matrix[poi_prevB][poi_A] + dense_cost_matrix[poi_A][poi_nextB];
-        return new_cost - old_cost;
+        return (dense_cost_matrix[pA][bPOI] + dense_cost_matrix[bPOI][aPOI] + dense_cost_matrix[aPOI][nB]) -
+               (dense_cost_matrix[pA][aPOI] + dense_cost_matrix[aPOI][bPOI] + dense_cost_matrix[bPOI][nB]);
     }
+    return (dense_cost_matrix[pA][bPOI] + dense_cost_matrix[bPOI][nA] + dense_cost_matrix[pB][aPOI] + dense_cost_matrix[aPOI][nB]) -
+           (dense_cost_matrix[pA][aPOI] + dense_cost_matrix[aPOI][nA] + dense_cost_matrix[pB][bPOI] + dense_cost_matrix[bPOI][nB]);
 }
 
-Route simulatedAnnealing(Route initial_route, double time_limit_seconds) {
-    auto sa_start = std::chrono::high_resolution_clock::now();
-    Route current = initial_route;
-    Route best = initial_route;
-    
-    uint32_t seed = std::chrono::system_clock::now().time_since_epoch().count();
-    std::mt19937 rng(seed);
-    double temp = 5000.0;
-    double cooling_rate = 0.99999; 
-    
-    int iterations = 0;
-    int seq_size = current.sequence.size();
-    
-    // If route is just depot -> depot, no optimization needed
-    if (seq_size <= 3) return best; 
-    
-    // Calculate D (number of deliveries) from the sequence size
-    int D = (seq_size - 2) / 2;
-    
-    std::uniform_int_distribution<int> dist(1, seq_size - 2);
-    std::uniform_real_distribution<double> prob(0.0, 1.0);
+Route simulatedAnnealing(Route init, double time_limit, int tid) {
+    auto start = std::chrono::high_resolution_clock::now();
+    Route curr = init, best = init;
+    std::mt19937 rng(std::chrono::system_clock::now().time_since_epoch().count() + tid);
+    // OPTIMIZED TEMP: Respect the baseline 
+    double temp = 20.0, cooling = 0.99999;
+    int D = (curr.sequence.size()-2)/2, iters = 0;
 
     while (true) {
-        if (++iterations % 1000 == 0) {
-            auto now = std::chrono::high_resolution_clock::now();
-            std::chrono::duration<double> elapsed = now - sa_start;
-            if (elapsed.count() > time_limit_seconds) break;
+        if (++iters % 1000 == 0) {
+            if (std::chrono::duration<double>(std::chrono::high_resolution_clock::now()-start).count() > time_limit) break;
         }
+        std::uniform_int_distribution<int> dist(1, curr.sequence.size()-2);
+        int iA = dist(rng), iB = dist(rng);
+        if (iA == iB) continue;
+
+        std::swap(curr.sequence[iA], curr.sequence[iB]);
+        if (!isLegalFast(curr.sequence, D)) { std::swap(curr.sequence[iA], curr.sequence[iB]); continue; }
         
-        int idxA = dist(rng);
-        int idxB = dist(rng);
-        if (idxA == idxB) continue;
-        
-        std::swap(current.sequence[idxA], current.sequence[idxB]);
-        
-        //Pass D to isLegalFast
-        if (!isLegalFast(current.sequence, D)) {
-            std::swap(current.sequence[idxA], current.sequence[idxB]); // Revert
-            continue;
+        std::swap(curr.sequence[iA], curr.sequence[iB]); // Unswap for delta
+        double delta = calculateDeltaCost(curr, iA, iB);
+        if (delta < 0 || std::exp(-delta/temp) > std::uniform_real_distribution<double>(0,1)(rng)) {
+            std::swap(curr.sequence[iA], curr.sequence[iB]); // Accept
+            curr.total_travel_time += delta;
+            if (curr.total_travel_time < best.total_travel_time) best = curr;
         }
-        
-        std::swap(current.sequence[idxA], current.sequence[idxB]); // Unswap to calc delta safely
-        
-        //Pass the 'current' Route object instead of current.sequence
-        double delta = calculateDeltaCost(current, idxA, idxB);
-        
-        if (delta < 0 || exp(-delta / temp) > prob(rng)) {
-            std::swap(current.sequence[idxA], current.sequence[idxB]); // Accept
-            current.total_travel_time += delta;
-            if (current.total_travel_time < best.total_travel_time) best = current;
-        }
-        
-        temp *= cooling_rate;
+        temp *= cooling;
     }
     return best;
 }
 
-//Multithreading 
-std::vector<CourierSubPath> travelingCourier(
-    const float turn_penalty,
-    const std::vector<DeliveryInf>& deliveries,
-    const std::vector<IntersectionIdx>& depots) {
-    
-    auto global_start = std::chrono::high_resolution_clock::now();
+// =============================================================================
+// MAIN ORCHESTRATOR
+// =============================================================================
+std::vector<CourierSubPath> travelingCourier(const float turn_penalty, const std::vector<DeliveryInf>& deliveries, const std::vector<IntersectionIdx>& depots) {
+    auto g_start = std::chrono::high_resolution_clock::now();
+    buildCostMatrix(deliveries, depots, turn_penalty);
 
-    //Pre-computations
-    buildCostMatrix(deliveries, depots, turn_penalty); 
-
-    //ultithreading Setup
-    int num_threads = std::thread::hardware_concurrency();
-    if (num_threads == 0) num_threads = 4;
-
-    double max_time = 48.0;
-    if (deliveries.size() <= 5) {
-        max_time = 0.5;
-    } else if (deliveries.size() <= 30) {
-        max_time = 5.0;
+    std::vector<Route> greedy_options;
+    for (auto d : depots) {
+        Route r = generateGreedyRoute(d, deliveries, depots);
+        if (!r.sequence.empty()) greedy_options.push_back(r);
     }
-    
+    std::sort(greedy_options.begin(), greedy_options.end(), [](const Route& a, const Route& b){ return a.total_travel_time < b.total_travel_time; });
+
+    int threads = std::thread::hardware_concurrency();
+    double max_t = (deliveries.size() <= 5) ? 0.5 : ((deliveries.size() <= 30) ? 5.0 : 48.0);
     std::vector<std::future<Route>> futures;
-    
-    for (int i = 0; i < num_threads; ++i) {
-      
-        futures.push_back(std::async(std::launch::async, [i, &deliveries, &depots, global_start, max_time]() {
-            IntersectionIdx start_depot = depots[i % depots.size()];
-            Route base = generateGreedyRoute(start_depot, deliveries, depots);
-            
-            auto now = std::chrono::high_resolution_clock::now();
-            std::chrono::duration<double> elapsed = now - global_start;
-            double time_left_for_sa = max_time - elapsed.count(); 
-            
-            if (time_left_for_sa <= 0) return base; // Fallback if matrix took too long
-            return simulatedAnnealing(base, time_left_for_sa);
+
+    for (int i=0; i<threads; ++i) {
+        Route base = greedy_options.empty() ? Route() : greedy_options[i % greedy_options.size()];
+        futures.push_back(std::async(std::launch::async, [i, base, g_start, max_t](){
+            if (base.sequence.empty()) return base;
+            double remain = max_t - std::chrono::duration<double>(std::chrono::high_resolution_clock::now()-g_start).count();
+            return (remain <= 0) ? base : simulatedAnnealing(base, remain, i);
         }));
     }
-    
-    //Find Absolute Best Route
-    Route absolute_best;
-    absolute_best.total_travel_time = std::numeric_limits<double>::infinity();
-    for (auto& f : futures) {
-        Route r = f.get();
-        if (r.total_travel_time < absolute_best.total_travel_time) {
-            absolute_best = r;
-        }
+
+    Route abs_best; abs_best.total_travel_time = std::numeric_limits<double>::infinity();
+    for (auto& f : futures) { Route r = f.get(); if (r.total_travel_time < abs_best.total_travel_time) abs_best = r; }
+
+    std::vector<CourierSubPath> result;
+    if (abs_best.sequence.empty()) return result;
+
+    for (size_t i=0; i<abs_best.sequence.size()-1; ++i) {
+        IntersectionIdx s = poi_to_intersection[abs_best.action_to_poi[abs_best.sequence[i]]];
+        IntersectionIdx e = poi_to_intersection[abs_best.action_to_poi[abs_best.sequence[i+1]]];
+        CourierSubPath sub; sub.intersections = {s, e};
+        sub.subpath = (s == e) ? std::vector<StreetSegmentIdx>() : findPathBetweenIntersections(turn_penalty, {s, e});
+        result.push_back(sub);
     }
-    
-    //Reconstruct Street Paths using M3 logic
-    std::vector<CourierSubPath> final_route;
-    if (absolute_best.sequence.empty() || absolute_best.total_travel_time == std::numeric_limits<double>::infinity()) {
-        return final_route; // Return empty if no valid route found
-    }
-    
-    for (size_t i = 0; i < absolute_best.sequence.size() - 1; ++i) {
-        int action_start = absolute_best.sequence[i];
-        int action_end = absolute_best.sequence[i+1];
-        
-        IntersectionIdx start_intersection = poi_to_intersection[absolute_best.action_to_poi[action_start]];
-        IntersectionIdx end_intersection = poi_to_intersection[absolute_best.action_to_poi[action_end]];
-        
-        CourierSubPath sub;
-        sub.intersections = {start_intersection, end_intersection};
-        
-        if (start_intersection == end_intersection) {
-            // Do not 'continue'! Push an empty path so the autotester knows we stopped here.
-            sub.subpath = std::vector<StreetSegmentIdx>(); 
-        } else {
-            sub.subpath = findPathBetweenIntersections(turn_penalty, {start_intersection, end_intersection});
-        }
-        
-        final_route.push_back(sub);
-    }
-    
-    return final_route;
+    return result;
 }
