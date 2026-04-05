@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <iostream>
 #include <numeric>
+#include <thread>
 
 // ============================================================
 // DATA STRUCTURES
@@ -36,29 +37,60 @@ static std::vector<std::vector<CacheEntry>>      cost_matrix;
 // HELPERS
 // ============================================================
 
-static inline double edgeCost(int from_poi, int to_poi) {
-    return cost_matrix[from_poi][to_poi].travel_time;
+static inline double edgeCost(int a, int b) {
+    return cost_matrix[a][b].travel_time;
 }
 
 static double recalcRouteCost(const Route& r) {
     double total = 0.0;
-    for (size_t i = 0; i + 1 < r.sequence.size(); ++i) {
-        int a = r.action_to_poi[r.sequence[i]];
-        int b = r.action_to_poi[r.sequence[i + 1]];
-        total += edgeCost(a, b);
-    }
+    const int sz = (int)r.sequence.size();
+    for (int i = 0; i + 1 < sz; ++i)
+        total += edgeCost(r.action_to_poi[r.sequence[i]], r.action_to_poi[r.sequence[i+1]]);
     return total;
 }
 
-// Fast legality check: every dropoff must come after its pickup
+// Fast legality: track pickup positions, check dropoff comes after
 static bool isLegalFast(const std::vector<int>& seq, int D) {
     std::vector<bool> picked(D, false);
     for (int a : seq) {
-        if (a < D) {
-            picked[a] = true;
-        } else if (a < 2 * D) {
-            if (!picked[a - D]) return false;
-        }
+        if (a < D)                         picked[a] = true;
+        else if (a < 2*D && !picked[a-D])  return false;
+    }
+    return true;
+}
+
+// Ultra-fast legality check specifically for swap moves
+// Only validates the two positions that changed
+static bool isSwapLegal(const std::vector<int>& seq, int iA, int iB, int D) {
+    int aA = seq[iA], aB = seq[iB];
+    bool aA_is_drop = (aA >= D && aA < 2*D);
+    bool aB_is_drop = (aB >= D && aB < 2*D);
+    bool aA_is_pick = (aA >= 0 && aA < D);
+    bool aB_is_pick = (aB >= 0 && aB < D);
+
+    // Dropoff at iA: its pickup must appear before iA
+    if (aA_is_drop) {
+        int pick = aA - D;
+        bool found = false;
+        for (int i = 0; i < iA; ++i) if (seq[i] == pick) { found = true; break; }
+        if (!found) return false;
+    }
+    // Dropoff at iB: its pickup must appear before iB
+    if (aB_is_drop) {
+        int pick = aB - D;
+        bool found = false;
+        for (int i = 0; i < iB; ++i) if (seq[i] == pick) { found = true; break; }
+        if (!found) return false;
+    }
+    // Pickup moved to iA: its dropoff must NOT appear before iA
+    if (aA_is_pick) {
+        int drop = aA + D;
+        for (int i = 1; i < iA; ++i) if (seq[i] == drop) return false;
+    }
+    // Pickup moved to iB: its dropoff must NOT appear before iB
+    if (aB_is_pick) {
+        int drop = aB + D;
+        for (int i = 1; i < iB; ++i) if (seq[i] == drop) return false;
     }
     return true;
 }
@@ -69,7 +101,6 @@ void buildCostMatrix(const std::vector<DeliveryInf>& deliveries,
                      const std::vector<IntersectionIdx>& depots,
                      float turn_penalty) {
 
-    // Collect unique POIs
     std::vector<IntersectionIdx> unique_pois;
     unique_pois.reserve(2 * deliveries.size() + depots.size());
     for (auto& d : deliveries) {
@@ -83,6 +114,7 @@ void buildCostMatrix(const std::vector<DeliveryInf>& deliveries,
 
     poi_to_intersection = unique_pois;
     intersection_to_poi.clear();
+    intersection_to_poi.reserve(unique_pois.size() * 2);
     for (size_t i = 0; i < poi_to_intersection.size(); ++i)
         intersection_to_poi[poi_to_intersection[i]] = (int)i;
 
@@ -97,27 +129,25 @@ void buildCostMatrix(const std::vector<DeliveryInf>& deliveries,
     for (int i = 0; i < num_pois; ++i) {
         IntersectionIdx start_node = poi_to_intersection[i];
 
-        std::vector<double>          best_times(total_nodes, INF);
+        std::vector<double>           best_times(total_nodes, INF);
         std::vector<StreetSegmentIdx> prev_edge(total_nodes, NO_EDGE);
         std::priority_queue<WaveElem, std::vector<WaveElem>, CompareWaveElem> pq;
 
         best_times[start_node] = 0.0;
         pq.push(WaveElem(start_node, NO_EDGE, 0.0));
-
         int found_count = 0;
 
         while (!pq.empty() && found_count < num_pois) {
             WaveElem cur = pq.top(); pq.pop();
             if (cur.travelTime > best_times[cur.nodeID]) continue;
 
-            // Check if this node is a POI target
             auto it = intersection_to_poi.find(cur.nodeID);
             if (it != intersection_to_poi.end()) {
                 int j = it->second;
                 if (cost_matrix[i][j].travel_time == INF) {
                     cost_matrix[i][j].travel_time = cur.travelTime;
 
-                    // Reconstruct path from start_node -> cur.nodeID
+                    // Reconstruct and store path from start_node -> cur.nodeID
                     std::vector<StreetSegmentIdx> path;
                     IntersectionIdx tracer = cur.nodeID;
                     while (tracer != start_node) {
@@ -134,18 +164,17 @@ void buildCostMatrix(const std::vector<DeliveryInf>& deliveries,
             }
 
             StreetIdx currStreet = (cur.edgeID != NO_EDGE)
-                                       ? segmentInfos[cur.edgeID].streetID
-                                       : NO_STREET;
+                                       ? segmentInfos[cur.edgeID].streetID : NO_STREET;
 
             for (StreetSegmentIdx segID : intersectionSegments[cur.nodeID]) {
                 const auto& info = segmentInfos[segID];
                 IntersectionIdx neighbor;
-                if (info.from == cur.nodeID)        neighbor = info.to;
-                else if (!info.oneWay)              neighbor = info.from;
-                else                                continue;
+                if      (info.from == cur.nodeID) neighbor = info.to;
+                else if (!info.oneWay)            neighbor = info.from;
+                else                              continue;
 
-                double turn   = (currStreet != NO_STREET && currStreet != info.streetID)
-                                    ? turn_penalty : 0.0;
+                double turn    = (currStreet != NO_STREET && currStreet != info.streetID)
+                                     ? turn_penalty : 0.0;
                 double newTime = cur.travelTime + segmentTravelTimes[segID] + turn;
 
                 if (newTime < best_times[neighbor]) {
@@ -165,7 +194,6 @@ Route generateGreedyRoute(IntersectionIdx start_depot,
                           const std::vector<IntersectionIdx>& depots) {
     Route route;
     int D = (int)deliveries.size();
-    // Actions: 0..D-1 = pickups, D..2D-1 = dropoffs, 2D = start depot, 2D+1 = end depot
     route.action_to_poi.resize(2 * D + 2);
     for (int i = 0; i < D; ++i) {
         route.action_to_poi[i]     = intersection_to_poi[deliveries[i].pickUp];
@@ -176,8 +204,8 @@ Route generateGreedyRoute(IntersectionIdx start_depot,
     route.sequence.push_back(2 * D);
 
     std::vector<bool> picked(D, false), dropped(D, false);
-    int curr_poi = route.action_to_poi[2 * D];
-    int done = 0;
+    int    curr_poi   = route.action_to_poi[2 * D];
+    int    done       = 0;
     double total_time = 0.0;
 
     while (done < D) {
@@ -195,11 +223,9 @@ Route generateGreedyRoute(IntersectionIdx start_depot,
         }
 
         if (best_act == -1) { route.sequence.clear(); return route; }
-
         route.sequence.push_back(best_act);
         total_time += best_t;
         curr_poi = route.action_to_poi[best_act];
-
         if (best_act < D) picked[best_act] = true;
         else { dropped[best_act - D] = true; ++done; }
     }
@@ -208,16 +234,15 @@ Route generateGreedyRoute(IntersectionIdx start_depot,
     int    end_poi    = -1;
     double best_dep_t = std::numeric_limits<double>::infinity();
     for (auto dep : depots) {
-        int d_poi = intersection_to_poi[dep];
-        double t  = edgeCost(curr_poi, d_poi);
+        int    d_poi = intersection_to_poi[dep];
+        double t     = edgeCost(curr_poi, d_poi);
         if (t < best_dep_t) { best_dep_t = t; end_poi = d_poi; }
     }
     if (end_poi == -1) { route.sequence.clear(); return route; }
 
     route.action_to_poi[2 * D + 1] = end_poi;
     route.sequence.push_back(2 * D + 1);
-    total_time += best_dep_t;
-    route.total_travel_time = total_time;
+    route.total_travel_time = total_time + best_dep_t;
     return route;
 }
 
@@ -229,22 +254,19 @@ Route doubleBridge(const Route& r, std::mt19937& rng, int D) {
     int n = (int)r.sequence.size();
     if (n < 8) return r;
 
-    // Pick 4 cut positions strictly inside (not the depot endpoints)
     std::uniform_int_distribution<int> d(1, n - 2);
-    int c1 = d(rng), c2 = d(rng), c3 = d(rng), c4 = d(rng);
-    std::array<int,4> cuts = {c1, c2, c3, c4};
-    std::sort(cuts.begin(), cuts.end());
-    // Ensure all distinct
-    if (cuts[0]==cuts[1] || cuts[1]==cuts[2] || cuts[2]==cuts[3]) return r;
+    int c[4] = {d(rng), d(rng), d(rng), d(rng)};
+    std::sort(c, c + 4);
+    if (c[0]==c[1] || c[1]==c[2] || c[2]==c[3]) return r;
 
-    // Reconnect as seg0 + seg2 + seg1 + seg3
     Route nr = r;
     nr.sequence.clear();
-    for (int i = 0;          i < cuts[0]; ++i) nr.sequence.push_back(r.sequence[i]);
-    for (int i = cuts[1];    i < cuts[2]; ++i) nr.sequence.push_back(r.sequence[i]);
-    for (int i = cuts[0];    i < cuts[1]; ++i) nr.sequence.push_back(r.sequence[i]);
-    for (int i = cuts[2];    i < cuts[3]; ++i) nr.sequence.push_back(r.sequence[i]);
-    for (int i = cuts[3];    i < n;       ++i) nr.sequence.push_back(r.sequence[i]);
+    nr.sequence.reserve(n);
+    for (int i=0;    i<c[0]; ++i) nr.sequence.push_back(r.sequence[i]);
+    for (int i=c[2]; i<c[3]; ++i) nr.sequence.push_back(r.sequence[i]);
+    for (int i=c[1]; i<c[2]; ++i) nr.sequence.push_back(r.sequence[i]);
+    for (int i=c[0]; i<c[1]; ++i) nr.sequence.push_back(r.sequence[i]);
+    for (int i=c[3]; i<n;    ++i) nr.sequence.push_back(r.sequence[i]);
 
     if (!isLegalFast(nr.sequence, D)) return r;
     nr.total_travel_time = recalcRouteCost(nr);
@@ -252,113 +274,79 @@ Route doubleBridge(const Route& r, std::mt19937& rng, int D) {
 }
 
 // ============================================================
-// OR-OPT: RELOCATE A SINGLE STOP
+// O(1) DELTA COSTS
 // ============================================================
 
-// Returns the change in cost if we remove sequence[remove_idx] and
-// insert it after sequence[insert_after] (indices in current sequence).
-// Returns INF if move is out of bounds.
-static double orOptDelta(const Route& r, int remove_idx, int insert_after) {
-    int n = (int)r.sequence.size();
-    if (remove_idx <= 0 || remove_idx >= n - 1) return std::numeric_limits<double>::infinity();
-    if (insert_after <= 0 || insert_after >= n - 1) return std::numeric_limits<double>::infinity();
-    if (insert_after == remove_idx || insert_after == remove_idx - 1) return 0.0;
-
-    // Nodes involved (as POI indices)
+static inline double swapDelta(const Route& r, int iA, int iB) {
+    // iA < iB guaranteed by caller
     auto poi = [&](int idx) { return r.action_to_poi[r.sequence[idx]]; };
-
-    int prev_r = poi(remove_idx - 1);
-    int node_r = poi(remove_idx);
-    int next_r = poi(remove_idx + 1);
-
-    // After removal, insert_after index shifts if insert_after > remove_idx
-    int real_insert = insert_after;
-    if (insert_after > remove_idx) real_insert = insert_after - 1;
-
-    // Indices in modified sequence (after removing remove_idx)
-    // We simulate: build a temporary index mapping
-    // Cost removed by removing node_r from its current position:
-    double remove_cost = edgeCost(prev_r, node_r) + edgeCost(node_r, next_r);
-    double bridge_cost = edgeCost(prev_r, next_r);
-
-    // For insertion: find the two nodes between which we insert
-    // We need the nodes at real_insert and real_insert+1 in the NEW sequence
-    // Build the new sequence conceptually
-    std::vector<int> tmp_seq;
-    tmp_seq.reserve(n - 1);
-    for (int i = 0; i < n; ++i)
-        if (i != remove_idx) tmp_seq.push_back(r.sequence[i]);
-
-    if (real_insert >= (int)tmp_seq.size() - 1) return std::numeric_limits<double>::infinity();
-
-    int ins_prev = r.action_to_poi[tmp_seq[real_insert]];
-    int ins_next = r.action_to_poi[tmp_seq[real_insert + 1]];
-
-    double insert_cost  = edgeCost(ins_prev, node_r) + edgeCost(node_r, ins_next);
-    double removed_edge = edgeCost(ins_prev, ins_next);
-
-    return (bridge_cost + insert_cost) - (remove_cost + removed_edge);
-}
-
-// Apply the or-opt move and return the new route
-static Route applyOrOpt(const Route& r, int remove_idx, int insert_after, double delta) {
-    Route nr = r;
-    int action = nr.sequence[remove_idx];
-    nr.sequence.erase(nr.sequence.begin() + remove_idx);
-
-    int real_insert = insert_after;
-    if (insert_after > remove_idx) real_insert = insert_after - 1;
-
-    nr.sequence.insert(nr.sequence.begin() + real_insert + 1, action);
-    nr.total_travel_time = r.total_travel_time + delta;
-    return nr;
-}
-
-// ============================================================
-// SWAP DELTA COST (O(1))
-// ============================================================
-
-static double swapDelta(const Route& r, int iA, int iB) {
-    if (iA > iB) std::swap(iA, iB);
-    int n = (int)r.sequence.size();
-    if (iA <= 0 || iB >= n - 1) return std::numeric_limits<double>::infinity();
-
-    auto poi = [&](int idx) { return r.action_to_poi[r.sequence[idx]]; };
-
-    int pA = poi(iA - 1), A = poi(iA), nA = poi(iA + 1);
-    int pB = poi(iB - 1), B = poi(iB), nB = poi(iB + 1);
+    int pA = poi(iA-1), A = poi(iA), nA = poi(iA+1);
+    int pB = poi(iB-1), B = poi(iB), nB = poi(iB+1);
 
     if (iA + 1 == iB) {
-        // Adjacent swap
-        double old_c = edgeCost(pA, A) + edgeCost(A, B) + edgeCost(B, nB);
-        double new_c = edgeCost(pA, B) + edgeCost(B, A) + edgeCost(A, nB);
-        return new_c - old_c;
-    } else {
-        double old_c = edgeCost(pA, A) + edgeCost(A, nA) + edgeCost(pB, B) + edgeCost(B, nB);
-        double new_c = edgeCost(pA, B) + edgeCost(B, nA) + edgeCost(pB, A) + edgeCost(A, nB);
-        return new_c - old_c;
+        return (edgeCost(pA,B) + edgeCost(B,A) + edgeCost(A,nB))
+             - (edgeCost(pA,A) + edgeCost(A,B) + edgeCost(B,nB));
     }
+    return (edgeCost(pA,B) + edgeCost(B,nA) + edgeCost(pB,A) + edgeCost(A,nB))
+         - (edgeCost(pA,A) + edgeCost(A,nA) + edgeCost(pB,B) + edgeCost(B,nB));
+}
+
+// Or-opt delta: cost change of removing seq[ri] and inserting after seq[ii]
+static double orOptDelta(const Route& r, int ri, int ii) {
+    int n = (int)r.sequence.size();
+    if (ri <= 0 || ri >= n-1) return std::numeric_limits<double>::infinity();
+    if (ii <= 0 || ii >= n-1) return std::numeric_limits<double>::infinity();
+    if (ii == ri || ii == ri-1) return 0.0;
+
+    auto p = [&](int idx) { return r.action_to_poi[r.sequence[idx]]; };
+
+    int prev_r = p(ri-1), node_r = p(ri), next_r = p(ri+1);
+    double rem  = edgeCost(prev_r, node_r) + edgeCost(node_r, next_r);
+    double brdg = edgeCost(prev_r, next_r);
+
+    // Insertion point in original sequence (before removal)
+    int ins_next_orig = (ii > ri) ? ii + 1 : ii + 1;
+    if (ins_next_orig >= n) return std::numeric_limits<double>::infinity();
+
+    int ins_prev = p(ii);
+    int ins_next = p(ins_next_orig);
+
+    double add  = edgeCost(ins_prev, node_r) + edgeCost(node_r, ins_next);
+    double repl = edgeCost(ins_prev, ins_next);
+
+    return (brdg + add) - (rem + repl);
+}
+
+// Apply or-opt move: remove seq[ri], insert after seq[ii]
+static Route applyOrOpt(Route r, int ri, int ii) {
+    int action = r.sequence[ri];
+    r.sequence.erase(r.sequence.begin() + ri);
+    int ins = (ii > ri) ? ii - 1 : ii;
+    r.sequence.insert(r.sequence.begin() + ins + 1, action);
+    return r;
 }
 
 //CALIBRATED SIMULATED ANNEALING (From Lecture 22)
 
 Route simulatedAnnealing(Route init, double time_limit_sec, int tid,
                          const std::chrono::high_resolution_clock::time_point& g_start) {
+
     Route curr = init, best = init;
     int D = ((int)curr.sequence.size() - 2) / 2;
     if (D < 1) return best;
 
+    // Each thread gets unique seed and starting temperature for diversity
     std::mt19937 rng(std::chrono::system_clock::now().time_since_epoch().count()
                      + (uint64_t)tid * 6364136223846793005ULL);
     std::uniform_real_distribution<double> dist01(0.0, 1.0);
 
     // Calibrate starting temperature: accept ~80% of bad moves initially
-    double temp     = 300.0 + tid * 50.0;  // Diversify starting temps across threads
-    double cooling  = 0.999993;
-    int    iters    = 0;
-    int    no_improv= 0;
+    double temp    = 200.0 + tid * 40.0;  // Diversify starting temps across threads
+    double cooling = 0.999992;
+    int    iters   = 0, no_improv = 0;
+    int    n       = (int)curr.sequence.size();
 
-    auto timeLeft = [&]() -> double {
+    auto timeLeft = [&]() {
         return time_limit_sec - std::chrono::duration<double>(
             std::chrono::high_resolution_clock::now() - g_start).count();
     };
@@ -368,79 +356,56 @@ Route simulatedAnnealing(Route init, double time_limit_sec, int tid,
 
         // Time check every 2000 iterations to reduce overhead
         if (iters % 2000 == 0) {
-            if (timeLeft() <= 0.15) break;
-
-            // Reheat if stuck
-            if (no_improv > 300000) {
-                curr = best;
-                temp = 150.0;
-                no_improv = 0;
-                // Apply double-bridge to escape local optimum
+            if (timeLeft() <= 0.1) break;
+            // Reheat + double-bridge if stuck
+            if (no_improv > 200000) {
+                curr = best; temp = 120.0; no_improv = 0;
                 Route perturbed = doubleBridge(curr, rng, D);
-                if (!perturbed.sequence.empty() &&
-                    perturbed.total_travel_time < std::numeric_limits<double>::infinity()) {
-                    curr = perturbed;
-                }
+                if (!perturbed.sequence.empty()) { curr = perturbed; n = (int)curr.sequence.size(); }
             }
         }
 
-        int n = (int)curr.sequence.size();
         if (n < 4) break;
 
         std::uniform_int_distribution<int> posD(1, n - 2);
+        int iA = posD(rng), iB = posD(rng);
+        if (iA == iB) continue;
 
-        double delta = std::numeric_limits<double>::infinity();
-        bool   use_or_opt = dist01(rng) < 0.45;  // 45% or-opt, 55% swap
-
-        int iA = posD(rng);
-        int iB = posD(rng);
-        if (iA == iB) { temp *= cooling; continue; }
-
-        if (use_or_opt) {
-            // Or-opt: relocate iA after iB
-            delta = orOptDelta(curr, iA, iB);
+        // 40% or-opt (relocate), 60% swap — swap is cheaper so we do more of it
+        if (dist01(rng) < 0.40) {
+            // Or-opt move
+            double delta = orOptDelta(curr, iA, iB);
             if (delta >= std::numeric_limits<double>::infinity()) { temp *= cooling; continue; }
 
-            // Check legality
-            Route candidate = applyOrOpt(curr, iA, iB, delta);
-            if (!isLegalFast(candidate.sequence, D)) { temp *= cooling; continue; }
-
             if (delta < 0 || dist01(rng) < std::exp(-delta / temp)) {
+                Route candidate = applyOrOpt(curr, iA, iB);
+                if (!isLegalFast(candidate.sequence, D)) { temp *= cooling; continue; }
+                candidate.total_travel_time = curr.total_travel_time + delta;
                 curr = std::move(candidate);
-                if (curr.total_travel_time < best.total_travel_time) {
-                    best = curr;
-                    no_improv = 0;
-                } else {
-                    ++no_improv;
-                }
-            } else {
-                ++no_improv;
-            }
+                n    = (int)curr.sequence.size();
+                if (curr.total_travel_time < best.total_travel_time) { best = curr; no_improv = 0; }
+                else ++no_improv;
+            } else ++no_improv;
+
         } else {
             // Swap move
-            delta = swapDelta(curr, iA, iB);
+            if (iA > iB) std::swap(iA, iB);
+            double delta = swapDelta(curr, iA, iB);
             if (delta >= std::numeric_limits<double>::infinity()) { temp *= cooling; continue; }
 
             std::swap(curr.sequence[iA], curr.sequence[iB]);
-            if (!isLegalFast(curr.sequence, D)) {
-                std::swap(curr.sequence[iA], curr.sequence[iB]);
-                temp *= cooling;
-                continue;
-            }
-            curr.total_travel_time += delta;
 
-            if (delta < 0) {
-                if (curr.total_travel_time < best.total_travel_time) {
-                    best = curr;
-                    no_improv = 0;
-                }
-            } else if (dist01(rng) < std::exp(-delta / temp)) {
-                // Accepted a worse move — already swapped
-                ++no_improv;
-            } else {
-                // Reject: undo
+            if (!isSwapLegal(curr.sequence, iA, iB, D)) {
                 std::swap(curr.sequence[iA], curr.sequence[iB]);
-                curr.total_travel_time -= delta;
+                temp *= cooling; continue;
+            }
+
+            if (delta < 0 || dist01(rng) < std::exp(-delta / temp)) {
+                curr.total_travel_time += delta;
+                if (curr.total_travel_time < best.total_travel_time) { best = curr; no_improv = 0; }
+                else ++no_improv;
+            } else {
+                std::swap(curr.sequence[iA], curr.sequence[iB]); // reject: undo
                 ++no_improv;
             }
         }
@@ -468,25 +433,17 @@ std::vector<CourierSubPath> travelingCourier(
     std::vector<Route> greedy_options;
     for (auto dep : depots) {
         Route r = generateGreedyRoute(dep, deliveries, depots);
-        if (!r.sequence.empty() &&
-            r.total_travel_time < std::numeric_limits<double>::infinity()) {
+        if (!r.sequence.empty() && r.total_travel_time < std::numeric_limits<double>::infinity())
             greedy_options.push_back(r);
-        }
     }
-
     if (greedy_options.empty()) return {};
 
     std::sort(greedy_options.begin(), greedy_options.end(),
-              [](const Route& a, const Route& b) {
-                  return a.total_travel_time < b.total_travel_time;
-              });
+              [](const Route& a, const Route& b){ return a.total_travel_time < b.total_travel_time; });
 
     // Time budget
-    double max_t;
-    int    sz = (int)deliveries.size();
-    if      (sz <= 5)  max_t = 0.45;
-    else if (sz <= 30) max_t = 4.8;
-    else               max_t = 47.5;
+    int    sz    = (int)deliveries.size();
+    double max_t = (sz <= 5) ? 0.45 : (sz <= 30) ? 4.8 : 47.5;
 
     // Phase 3: Parallel SA — each thread gets a (possibly perturbed) starting route
     int num_threads = std::max(1, (int)std::thread::hardware_concurrency());
@@ -495,15 +452,14 @@ std::vector<CourierSubPath> travelingCourier(
     futures.reserve(num_threads);
 
     for (int tid = 0; tid < num_threads; ++tid) {
-        // Vary starting routes across threads; top routes for first threads
         Route base = greedy_options[tid % greedy_options.size()];
 
         // Perturb routes for threads beyond the first to encourage diversity
-        if (tid > 0 && base.sequence.size() >= 8) {
-            std::mt19937 init_rng(tid * 12345 + 9999);
+        if (tid > 0 && (int)base.sequence.size() >= 8) {
+            std::mt19937 init_rng((uint64_t)tid * 12345 + 9999);
             int D = ((int)base.sequence.size() - 2) / 2;
-            base = doubleBridge(base, init_rng, D);
-            if (base.sequence.empty()) base = greedy_options[tid % greedy_options.size()];
+            Route pb = doubleBridge(base, init_rng, D);
+            if (!pb.sequence.empty()) base = pb;
         }
 
         futures.push_back(std::async(std::launch::async,
@@ -516,13 +472,11 @@ std::vector<CourierSubPath> travelingCourier(
     }
 
     // Collect best result across all threads
-    Route abs_best;
-    abs_best.total_travel_time = std::numeric_limits<double>::infinity();
+    Route abs_best; abs_best.total_travel_time = std::numeric_limits<double>::infinity();
     for (auto& f : futures) {
         Route r = f.get();
-        if (!r.sequence.empty() && r.total_travel_time < abs_best.total_travel_time) {
+        if (!r.sequence.empty() && r.total_travel_time < abs_best.total_travel_time)
             abs_best = r;
-        }
     }
 
     // Fallback to best greedy if SA somehow failed
@@ -536,17 +490,10 @@ std::vector<CourierSubPath> travelingCourier(
         int s_poi = abs_best.action_to_poi[abs_best.sequence[i]];
         int e_poi = abs_best.action_to_poi[abs_best.sequence[i + 1]];
 
-        IntersectionIdx s_inter = poi_to_intersection[s_poi];
-        IntersectionIdx e_inter = poi_to_intersection[e_poi];
-
         CourierSubPath sub;
-        sub.intersections = {s_inter, e_inter};
-
-        if (s_poi == e_poi) {
-            sub.subpath = {};
-        } else {
-            sub.subpath = cost_matrix[s_poi][e_poi].path;
-        }
+        sub.intersections = { poi_to_intersection[s_poi], poi_to_intersection[e_poi] };
+        sub.subpath = (s_poi == e_poi) ? std::vector<StreetSegmentIdx>()
+                                       : cost_matrix[s_poi][e_poi].path;
         result.push_back(sub);
     }
 
