@@ -33,13 +33,17 @@ static std::unordered_map<IntersectionIdx, int> intersection_to_poi;
 static std::vector<IntersectionIdx>              poi_to_intersection;
 static std::vector<std::vector<CacheEntry>>      cost_matrix;
 
+// Flat cost-only matrix for ultra-fast SA lookups (avoids CacheEntry indirection)
+static std::vector<double> flat_cost;   // flat_cost[i*N + j]
+static int num_pois_global = 0;
+
+static inline double edgeCost(int a, int b) {
+    return flat_cost[a * num_pois_global + b];
+}
+
 // ============================================================
 // HELPERS
 // ============================================================
-
-static inline double edgeCost(int a, int b) {
-    return cost_matrix[a][b].travel_time;
-}
 
 static double recalcRouteCost(const Route& r) {
     double total = 0.0;
@@ -49,48 +53,74 @@ static double recalcRouteCost(const Route& r) {
     return total;
 }
 
-// Fast legality: track pickup positions, check dropoff comes after
+// Fast legality: every dropoff must come after its pickup
 static bool isLegalFast(const std::vector<int>& seq, int D) {
     std::vector<bool> picked(D, false);
     for (int a : seq) {
-        if (a < D)                         picked[a] = true;
-        else if (a < 2*D && !picked[a-D])  return false;
+        if (a < D)                        picked[a] = true;
+        else if (a < 2*D && !picked[a-D]) return false;
     }
     return true;
 }
 
-// Ultra-fast legality check specifically for swap moves
-// Only validates the two positions that changed
+// Ultra-fast legality for swap: only checks the 2 moved positions
+// PRECONDITION: iA < iB, seq already has the swap applied
 static bool isSwapLegal(const std::vector<int>& seq, int iA, int iB, int D) {
     int aA = seq[iA], aB = seq[iB];
-    bool aA_is_drop = (aA >= D && aA < 2*D);
-    bool aB_is_drop = (aB >= D && aB < 2*D);
-    bool aA_is_pick = (aA >= 0 && aA < D);
-    bool aB_is_pick = (aB >= 0 && aB < D);
 
-    // Dropoff at iA: its pickup must appear before iA
-    if (aA_is_drop) {
+    // Dropoff now at iA: its pickup must appear somewhere before iA
+    if (aA >= D && aA < 2*D) {
         int pick = aA - D;
         bool found = false;
         for (int i = 0; i < iA; ++i) if (seq[i] == pick) { found = true; break; }
         if (!found) return false;
     }
-    // Dropoff at iB: its pickup must appear before iB
-    if (aB_is_drop) {
+    // Pickup now at iA: its dropoff must not appear before iA
+    if (aA >= 0 && aA < D) {
+        int drop = aA + D;
+        for (int i = 1; i < iA; ++i) if (seq[i] == drop) return false;
+    }
+    // Dropoff now at iB: its pickup must appear somewhere before iB
+    if (aB >= D && aB < 2*D) {
         int pick = aB - D;
         bool found = false;
         for (int i = 0; i < iB; ++i) if (seq[i] == pick) { found = true; break; }
         if (!found) return false;
     }
-    // Pickup moved to iA: its dropoff must NOT appear before iA
-    if (aA_is_pick) {
-        int drop = aA + D;
-        for (int i = 1; i < iA; ++i) if (seq[i] == drop) return false;
-    }
-    // Pickup moved to iB: its dropoff must NOT appear before iB
-    if (aB_is_pick) {
+    // Pickup now at iB: its dropoff must not appear before iB
+    if (aB >= 0 && aB < D) {
         int drop = aB + D;
         for (int i = 1; i < iB; ++i) if (seq[i] == drop) return false;
+    }
+    return true;
+}
+
+// Fast legality check for or-opt: only check the moved action at its new position
+// PRECONDITION: action = seq[ri] before move, will be placed after position ii
+static bool isOrOptLegal(const std::vector<int>& seq, int ri, int ii, int D) {
+    int action = seq[ri];
+
+    // Case 1: moving a dropoff — its pickup must be before new position
+    if (action >= D && action < 2*D) {
+        int pick = action - D;
+        // New position is after ii (adjusted for removal of ri)
+        // Pickup must appear before the new insertion point
+        int new_pos = (ii > ri) ? ii : ii + 1; // position in original seq after insertion
+        for (int i = 0; i < new_pos; ++i) {
+            if (i == ri) continue;
+            if (seq[i] == pick) return true;
+        }
+        return false;
+    }
+
+    // Case 2: moving a pickup — its dropoff must not appear before new position
+    if (action >= 0 && action < D) {
+        int drop = action + D;
+        int new_pos = (ii > ri) ? ii : ii + 1;
+        for (int i = 1; i < new_pos; ++i) {
+            if (i == ri) continue;
+            if (seq[i] == drop) return false;
+        }
     }
     return true;
 }
@@ -122,6 +152,7 @@ void buildCostMatrix(const std::vector<DeliveryInf>& deliveries,
     int total_nodes = getNumIntersections();
     const double INF = std::numeric_limits<double>::infinity();
 
+    num_pois_global = num_pois;
     cost_matrix.assign(num_pois, std::vector<CacheEntry>(num_pois));
 
     // Run one Dijkstra per POI in parallel, storing paths
@@ -185,6 +216,12 @@ void buildCostMatrix(const std::vector<DeliveryInf>& deliveries,
             }
         }
     }
+
+    // Build flat cost array for cache-friendly SA lookups
+    flat_cost.resize((size_t)num_pois * num_pois);
+    for (int i = 0; i < num_pois; ++i)
+        for (int j = 0; j < num_pois; ++j)
+            flat_cost[i * num_pois + j] = cost_matrix[i][j].travel_time;
 }
 
 //MULTI-START GREEDY BASELINE (From Lecture 20)
@@ -247,6 +284,61 @@ Route generateGreedyRoute(IntersectionIdx start_depot,
 }
 
 // ============================================================
+// GREEDY LOCAL SEARCH: best-improvement or-opt pass before SA
+// Runs a full O(N^2) best-improvement pass to get a strong starting point
+// ============================================================
+
+Route greedyOrOptPass(Route r, int D) {
+    bool improved = true;
+    int n = (int)r.sequence.size();
+    while (improved) {
+        improved = false;
+        for (int ri = 1; ri < n - 1; ++ri) {
+            double best_delta = -1e-9; // only accept strict improvements
+            int    best_ii    = -1;
+
+            int prev_r = r.action_to_poi[r.sequence[ri-1]];
+            int node_r = r.action_to_poi[r.sequence[ri]];
+            int next_r = r.action_to_poi[r.sequence[ri+1]];
+            double rem  = edgeCost(prev_r, node_r) + edgeCost(node_r, next_r);
+            double brdg = edgeCost(prev_r, next_r);
+
+            for (int ii = 1; ii < n - 1; ++ii) {
+                if (ii == ri || ii == ri - 1) continue;
+                int ins_next_orig = ii + 1;
+                if (ins_next_orig >= n) continue;
+
+                int ins_prev = r.action_to_poi[r.sequence[ii]];
+                int ins_next = r.action_to_poi[r.sequence[ins_next_orig]];
+                double delta = (brdg + edgeCost(ins_prev, node_r) + edgeCost(node_r, ins_next))
+                             - (rem  + edgeCost(ins_prev, ins_next));
+
+                if (delta < best_delta) {
+                    // Check legality before committing
+                    if (isOrOptLegal(r.sequence, ri, ii, D)) {
+                        best_delta = delta;
+                        best_ii    = ii;
+                    }
+                }
+            }
+
+            if (best_ii != -1) {
+                // Apply move in-place
+                int action = r.sequence[ri];
+                r.sequence.erase(r.sequence.begin() + ri);
+                int ins = (best_ii > ri) ? best_ii - 1 : best_ii;
+                r.sequence.insert(r.sequence.begin() + ins + 1, action);
+                r.total_travel_time += best_delta;
+                improved = true;
+                n = (int)r.sequence.size();
+                break; // restart scan after any improvement
+            }
+        }
+    }
+    return r;
+}
+
+// ============================================================
 // PERTURBATION: DOUBLE-BRIDGE (large neighborhood escape)
 // ============================================================
 
@@ -292,38 +384,67 @@ static inline double swapDelta(const Route& r, int iA, int iB) {
 }
 
 // Or-opt delta: cost change of removing seq[ri] and inserting after seq[ii]
-static double orOptDelta(const Route& r, int ri, int ii) {
-    int n = (int)r.sequence.size();
-    if (ri <= 0 || ri >= n-1) return std::numeric_limits<double>::infinity();
-    if (ii <= 0 || ii >= n-1) return std::numeric_limits<double>::infinity();
-    if (ii == ri || ii == ri-1) return 0.0;
-
+static inline double orOptDelta(const Route& r, int ri, int ii, int n) {
+    // Bounds already checked by caller
     auto p = [&](int idx) { return r.action_to_poi[r.sequence[idx]]; };
 
     int prev_r = p(ri-1), node_r = p(ri), next_r = p(ri+1);
     double rem  = edgeCost(prev_r, node_r) + edgeCost(node_r, next_r);
     double brdg = edgeCost(prev_r, next_r);
 
-    // Insertion point in original sequence (before removal)
-    int ins_next_orig = (ii > ri) ? ii + 1 : ii + 1;
+    // ins_next is always ii+1 in original sequence (before removal)
+    int ins_next_orig = ii + 1;
     if (ins_next_orig >= n) return std::numeric_limits<double>::infinity();
 
     int ins_prev = p(ii);
     int ins_next = p(ins_next_orig);
-
     double add  = edgeCost(ins_prev, node_r) + edgeCost(node_r, ins_next);
     double repl = edgeCost(ins_prev, ins_next);
 
     return (brdg + add) - (rem + repl);
 }
 
+// Or-opt-2: move a pair of consecutive stops together
+static inline double orOpt2Delta(const Route& r, int ri, int ii, int n) {
+    if (ri + 1 >= n - 1) return std::numeric_limits<double>::infinity();
+    if (ii == ri || ii == ri-1 || ii == ri+1 || ii+1 >= n)
+        return std::numeric_limits<double>::infinity();
+
+    auto p = [&](int idx) { return r.action_to_poi[r.sequence[idx]]; };
+
+    int prev_r  = p(ri-1), A = p(ri), B = p(ri+1), next_r = p(ri+2);
+    double rem  = edgeCost(prev_r,A) + edgeCost(A,B) + edgeCost(B,next_r);
+    double brdg = edgeCost(prev_r, next_r);
+
+    int ins_next_orig = ii + 1;
+    if (ins_next_orig >= n) return std::numeric_limits<double>::infinity();
+    // Make sure we're not inserting inside the pair we're moving
+    if (ins_next_orig == ri || ins_next_orig == ri+1)
+        return std::numeric_limits<double>::infinity();
+
+    int ins_prev = p(ii);
+    int ins_next = p(ins_next_orig);
+    double add  = edgeCost(ins_prev,A) + edgeCost(A,B) + edgeCost(B,ins_next);
+    double repl = edgeCost(ins_prev, ins_next);
+
+    return (brdg + add) - (rem + repl);
+}
+
 // Apply or-opt move: remove seq[ri], insert after seq[ii]
-static Route applyOrOpt(Route r, int ri, int ii) {
+static inline void applyOrOptInPlace(Route& r, int ri, int ii) {
     int action = r.sequence[ri];
     r.sequence.erase(r.sequence.begin() + ri);
     int ins = (ii > ri) ? ii - 1 : ii;
     r.sequence.insert(r.sequence.begin() + ins + 1, action);
-    return r;
+}
+
+// Apply or-opt-2: remove seq[ri..ri+1], insert pair after seq[ii]
+static inline void applyOrOpt2InPlace(Route& r, int ri, int ii) {
+    int a1 = r.sequence[ri], a2 = r.sequence[ri+1];
+    r.sequence.erase(r.sequence.begin() + ri, r.sequence.begin() + ri + 2);
+    int ins = (ii > ri + 1) ? ii - 2 : (ii > ri) ? ii - 1 : ii;
+    r.sequence.insert(r.sequence.begin() + ins + 1, a2);
+    r.sequence.insert(r.sequence.begin() + ins + 1, a1);
 }
 
 //CALIBRATED SIMULATED ANNEALING (From Lecture 22)
@@ -341,8 +462,10 @@ Route simulatedAnnealing(Route init, double time_limit_sec, int tid,
     std::uniform_real_distribution<double> dist01(0.0, 1.0);
 
     // Calibrate starting temperature: accept ~80% of bad moves initially
-    double temp    = 200.0 + tid * 40.0;  // Diversify starting temps across threads
-    double cooling = 0.999992;
+    // Thread 0 = exploitation (low temp), higher threads = exploration (high temp)
+    double temp    = 150.0 + tid * 60.0;
+    // Slower cooling = more iterations at useful temperatures
+    double cooling = 0.999994 - tid * 0.000001; // slight variation per thread
     int    iters   = 0, no_improv = 0;
     int    n       = (int)curr.sequence.size();
 
@@ -356,10 +479,10 @@ Route simulatedAnnealing(Route init, double time_limit_sec, int tid,
 
         // Time check every 2000 iterations to reduce overhead
         if (iters % 2000 == 0) {
-            if (timeLeft() <= 0.1) break;
-            // Reheat + double-bridge if stuck
-            if (no_improv > 200000) {
-                curr = best; temp = 120.0; no_improv = 0;
+            if (timeLeft() <= 0.08) break;
+            // Reheat + double-bridge if stuck in local optimum
+            if (no_improv > 150000) {
+                curr = best; temp = 80.0 + tid * 20.0; no_improv = 0;
                 Route perturbed = doubleBridge(curr, rng, D);
                 if (!perturbed.sequence.empty()) { curr = perturbed; n = (int)curr.sequence.size(); }
             }
@@ -369,37 +492,22 @@ Route simulatedAnnealing(Route init, double time_limit_sec, int tid,
 
         std::uniform_int_distribution<int> posD(1, n - 2);
         int iA = posD(rng), iB = posD(rng);
-        if (iA == iB) continue;
+        if (iA == iB) { continue; }
 
-        // 40% or-opt (relocate), 60% swap — swap is cheaper so we do more of it
-        if (dist01(rng) < 0.40) {
-            // Or-opt move
-            double delta = orOptDelta(curr, iA, iB);
-            if (delta >= std::numeric_limits<double>::infinity()) { temp *= cooling; continue; }
+        // Move selection: 50% swap, 35% or-opt-1, 15% or-opt-2
+        double move_roll = dist01(rng);
 
-            if (delta < 0 || dist01(rng) < std::exp(-delta / temp)) {
-                Route candidate = applyOrOpt(curr, iA, iB);
-                if (!isLegalFast(candidate.sequence, D)) { temp *= cooling; continue; }
-                candidate.total_travel_time = curr.total_travel_time + delta;
-                curr = std::move(candidate);
-                n    = (int)curr.sequence.size();
-                if (curr.total_travel_time < best.total_travel_time) { best = curr; no_improv = 0; }
-                else ++no_improv;
-            } else ++no_improv;
-
-        } else {
-            // Swap move
+        if (move_roll < 0.50) {
+            // ---- SWAP MOVE ----
             if (iA > iB) std::swap(iA, iB);
             double delta = swapDelta(curr, iA, iB);
             if (delta >= std::numeric_limits<double>::infinity()) { temp *= cooling; continue; }
 
             std::swap(curr.sequence[iA], curr.sequence[iB]);
-
             if (!isSwapLegal(curr.sequence, iA, iB, D)) {
                 std::swap(curr.sequence[iA], curr.sequence[iB]);
                 temp *= cooling; continue;
             }
-
             if (delta < 0 || dist01(rng) < std::exp(-delta / temp)) {
                 curr.total_travel_time += delta;
                 if (curr.total_travel_time < best.total_travel_time) { best = curr; no_improv = 0; }
@@ -408,6 +516,43 @@ Route simulatedAnnealing(Route init, double time_limit_sec, int tid,
                 std::swap(curr.sequence[iA], curr.sequence[iB]); // reject: undo
                 ++no_improv;
             }
+
+        } else if (move_roll < 0.85) {
+            // ---- OR-OPT-1 MOVE (relocate single stop) ----
+            if (iA <= 0 || iA >= n-1 || iB <= 0 || iB >= n-1) { temp *= cooling; continue; }
+            if (iB == iA - 1) { temp *= cooling; continue; }
+
+            double delta = orOptDelta(curr, iA, iB, n);
+            if (delta >= std::numeric_limits<double>::infinity()) { temp *= cooling; continue; }
+
+            if (delta < 0 || dist01(rng) < std::exp(-delta / temp)) {
+                // Check legality before applying
+                if (!isOrOptLegal(curr.sequence, iA, iB, D)) { temp *= cooling; continue; }
+                applyOrOptInPlace(curr, iA, iB);
+                curr.total_travel_time += delta;
+                n = (int)curr.sequence.size();
+                if (curr.total_travel_time < best.total_travel_time) { best = curr; no_improv = 0; }
+                else ++no_improv;
+            } else ++no_improv;
+
+        } else {
+            // ---- OR-OPT-2 MOVE (relocate pair of stops) ----
+            int ri = iA, ii = iB;
+            if (ri + 1 >= n - 1 || ii <= 0 || ii >= n-1) { temp *= cooling; continue; }
+
+            double delta = orOpt2Delta(curr, ri, ii, n);
+            if (delta >= std::numeric_limits<double>::infinity()) { temp *= cooling; continue; }
+
+            if (delta < 0 || dist01(rng) < std::exp(-delta / temp)) {
+                // Legality: check both actions of the pair
+                if (!isOrOptLegal(curr.sequence, ri,   ii, D) ||
+                    !isOrOptLegal(curr.sequence, ri+1, ii, D)) { temp *= cooling; continue; }
+                applyOrOpt2InPlace(curr, ri, ii);
+                curr.total_travel_time += delta;
+                n = (int)curr.sequence.size();
+                if (curr.total_travel_time < best.total_travel_time) { best = curr; no_improv = 0; }
+                else ++no_improv;
+            } else ++no_improv;
         }
 
         temp *= cooling;
@@ -444,6 +589,17 @@ std::vector<CourierSubPath> travelingCourier(
     // Time budget
     int    sz    = (int)deliveries.size();
     double max_t = (sz <= 5) ? 0.45 : (sz <= 30) ? 4.8 : 47.5;
+
+    // Phase 2b: Run a greedy best-improvement or-opt pass on the top routes
+    // This is cheap (seconds) and gives SA a much stronger starting point
+    int num_greedy_polish = std::min(2, (int)greedy_options.size());
+    for (int i = 0; i < num_greedy_polish; ++i) {
+        int Di = ((int)greedy_options[i].sequence.size() - 2) / 2;
+        greedy_options[i] = greedyOrOptPass(greedy_options[i], Di);
+    }
+    // Re-sort after polishing
+    std::sort(greedy_options.begin(), greedy_options.end(),
+              [](const Route& a, const Route& b){ return a.total_travel_time < b.total_travel_time; });
 
     // Phase 3: Parallel SA — each thread gets a (possibly perturbed) starting route
     int num_threads = std::max(1, (int)std::thread::hardware_concurrency());
