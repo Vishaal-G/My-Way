@@ -12,9 +12,7 @@
 #include <algorithm>
 #include <iostream>
 
-// =============================================================================
 // DATA STRUCTURES
-// =============================================================================
 struct Route {
     std::vector<int> sequence;      // Action IDs
     std::vector<int> action_to_poi; // Action ID -> Dense Matrix Index
@@ -25,9 +23,8 @@ std::unordered_map<IntersectionIdx, int> intersection_to_poi;
 std::vector<IntersectionIdx> poi_to_intersection;
 std::vector<std::vector<double>> dense_cost_matrix;
 
-// =============================================================================
-// PHASE 1: PARALLEL MATRIX BUILDER (From Tutorial Slide 29/40)
-// =============================================================================
+// PHASE 1: PARALLEL MATRIX BUILDER (fropm tutorial) 
+
 void buildCostMatrix(const std::vector<DeliveryInf>& deliveries, const std::vector<IntersectionIdx>& depots, float turn_penalty) {
     std::vector<IntersectionIdx> unique_pois;
     for (auto d : deliveries) { unique_pois.push_back(d.pickUp); unique_pois.push_back(d.dropOff); }
@@ -44,7 +41,7 @@ void buildCostMatrix(const std::vector<DeliveryInf>& deliveries, const std::vect
     dense_cost_matrix.assign(num_pois, std::vector<double>(num_pois, std::numeric_limits<double>::infinity()));
     int total_nodes = getNumIntersections();
 
-    // Unlock massive speedup with OpenMP [cite: 269, 463]
+    
     #pragma omp parallel for
     for (int i = 0; i < num_pois; ++i) {
         std::vector<double> best_times(total_nodes, std::numeric_limits<double>::infinity());
@@ -86,9 +83,7 @@ void buildCostMatrix(const std::vector<DeliveryInf>& deliveries, const std::vect
     }
 }
 
-// =============================================================================
-// PHASE 2: MULTI-START GREEDY BASELINE (From Lecture 20)
-// =============================================================================
+//MULTI-START GREEDY BASELINE (From Lecture 20)
 Route generateGreedyRoute(IntersectionIdx start_depot, const std::vector<DeliveryInf>& deliveries, const std::vector<IntersectionIdx>& depots) {
     Route route;
     int D = deliveries.size();
@@ -137,9 +132,7 @@ Route generateGreedyRoute(IntersectionIdx start_depot, const std::vector<Deliver
     return route;
 }
 
-// =============================================================================
-// PHASE 3: CALIBRATED SIMULATED ANNEALING (From Lecture 22)
-// =============================================================================
+//CALIBRATED SIMULATED ANNEALING (From Lecture 22)
 bool isLegalFast(const std::vector<int>& seq, int D) {
     std::vector<bool> p(D, false);
     for (int a : seq) {
@@ -168,7 +161,7 @@ Route simulatedAnnealing(Route init, double time_limit, int tid) {
     auto start = std::chrono::high_resolution_clock::now();
     Route curr = init, best = init;
     std::mt19937 rng(std::chrono::system_clock::now().time_since_epoch().count() + tid);
-    // OPTIMIZED TEMP: Respect the baseline 
+    
     double temp = 20.0, cooling = 0.99999;
     int D = (curr.sequence.size()-2)/2, iters = 0;
 
@@ -195,9 +188,7 @@ Route simulatedAnnealing(Route init, double time_limit, int tid) {
     return best;
 }
 
-// =============================================================================
-// MAIN ORCHESTRATOR
-// =============================================================================
+
 std::vector<CourierSubPath> travelingCourier(const float turn_penalty, const std::vector<DeliveryInf>& deliveries, const std::vector<IntersectionIdx>& depots) {
     auto g_start = std::chrono::high_resolution_clock::now();
     buildCostMatrix(deliveries, depots, turn_penalty);
